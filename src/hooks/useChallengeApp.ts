@@ -81,7 +81,8 @@ export function useChallengeApp() {
   const [submissions, setSubmissions] = useState<TaskSubmission[]>(() => localStore.getSubmissions());
   const [appConfig, setAppConfig] = useState<AppConfig>(() => localStore.getAppConfig());
   const [activeUserId, setActiveUserId] = useState<string | null>(() => localStore.getActiveUserId());
-  const [hasSeenWelcome, setHasSeenWelcome] = useState<boolean>(() => localStore.getHasSeenWelcome());
+  // Always show WelcomeScreen on every app launch before Login / Dashboard
+  const [hasSeenWelcome, setHasSeenWelcome] = useState<boolean>(false);
   const [reminderSettings, setReminderSettings] = useState<ReminderSettings>(() =>
     localStore.getReminderSettings()
   );
@@ -202,7 +203,6 @@ export function useChallengeApp() {
   }, [submissions]);
 
   const completeWelcome = useCallback(() => {
-    localStore.markWelcomeSeen();
     setHasSeenWelcome(true);
   }, []);
 

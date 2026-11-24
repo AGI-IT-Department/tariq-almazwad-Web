@@ -4,7 +4,7 @@
 
 @font-face {
   font-family: 'Cairo';
-  src: url('/fonts/cairo.ttf') format('truetype');
+  src: url('../app/src/main/res/font/cairo.ttf') format('truetype');
   font-weight: 400 800;
   font-style: normal;
   font-display: swap;
@@ -12,7 +12,7 @@
 
 @font-face {
   font-family: 'Amiri';
-  src: url('/fonts/amiri.ttf') format('truetype');
+  src: url('../app/src/main/res/font/amiri.ttf') format('truetype');
   font-weight: 400 700;
   font-style: normal;
   font-display: swap;

@@ -28,6 +28,7 @@ import {
   TaskIcon,
   TaskSubmissionSheet,
 } from '../components/SharedUi';
+import { APP_ASSETS } from '../lib/assets';
 
 interface DailyTasksScreenProps {
   user: YouthUser;
@@ -120,7 +121,7 @@ export const DailyTasksScreen: React.FC<DailyTasksScreenProps> = ({
       {/* Interactive Nativity Hero Card */}
       <section className="relative overflow-hidden rounded-[26px] shadow-lg">
         <img
-          src="/nativity-hero.jpg"
+          src={APP_ASSETS.nativityHero}
           alt="نجمة بيت لحم لصوم الميلاد المجيد"
           className="absolute inset-0 h-full w-full object-cover"
         />

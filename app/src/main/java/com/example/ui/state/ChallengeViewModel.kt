@@ -67,6 +67,7 @@ class ChallengeViewModel(application: Application) : AndroidViewModel(applicatio
     private val _isAdminOpen = MutableStateFlow(false)
     private val _isAdminUnlocked = MutableStateFlow(false)
     private val _isSyncing = MutableStateFlow(false)
+    private val _hasSeenWelcome = MutableStateFlow(false)
 
     private val _snackbarMessages = MutableSharedFlow<String>(extraBufferCapacity = 6)
     val snackbarMessages: SharedFlow<String> = _snackbarMessages.asSharedFlow()
@@ -93,7 +94,7 @@ class ChallengeViewModel(application: Application) : AndroidViewModel(applicatio
     val uiState: StateFlow<AppUiState> = combine(
         dataFlow,
         repository.reminderSettings,
-        repository.hasSeenWelcome,
+        _hasSeenWelcome,
         uiControlsFlow
     ) { data, reminders, seenWelcome, controls ->
         val activeUser = data.users.firstOrNull { it.id == data.activeId }
@@ -160,9 +161,7 @@ class ChallengeViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun completeWelcome() {
-        viewModelScope.launch {
-            repository.markWelcomeSeen()
-        }
+        _hasSeenWelcome.value = true
     }
 
     fun refreshNow() {

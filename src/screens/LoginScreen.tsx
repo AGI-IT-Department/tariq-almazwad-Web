@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Loader2, Lock, Phone, ShieldCheck, Sparkles, User } from 'lucide-react';
+import { APP_ASSETS } from '../lib/assets';
 
 interface LoginScreenProps {
   isSyncing: boolean;
@@ -47,7 +48,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         <div className="overflow-hidden rounded-[24px] border border-gold-warm/60 bg-gradient-to-b from-midnight-dark to-midnight p-4 text-white shadow-md">
           <div className="flex items-center gap-3">
             <img
-              src="/logo-challenge.png"
+              src={APP_ASSETS.challengeLogo}
+              onError={(e) => {
+                e.currentTarget.onerror = null;
+                e.currentTarget.src = APP_ASSETS.challengeLogoFallback;
+              }}
               alt="شعار تحدي طريق المزود"
               className="h-[72px] w-[72px] shrink-0 rounded-full object-contain"
             />
@@ -60,9 +65,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             </div>
             <div className="shrink-0 rounded-2xl border border-gold-warm/70 bg-white p-1.5">
               <img
-                src="/logo-church.png"
+                src={APP_ASSETS.churchLogo}
+                onError={(e) => {
+                  e.currentTarget.onerror = null;
+                  e.currentTarget.src = APP_ASSETS.churchLogoFallback;
+                }}
                 alt="شعار أسرة أبو سيفين للشباب الخريجين"
-                className="h-11 w-11 object-contain"
+                className="h-11 w-11 bg-white object-contain"
               />
             </div>
           </div>

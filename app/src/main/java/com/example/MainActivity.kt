@@ -169,7 +169,7 @@ fun TariqAlMazwadApp(
             }
         }
 
-        !uiState.hasSeenWelcome && uiState.activeUser == null -> {
+        !uiState.hasSeenWelcome -> {
             WelcomeScreen(
                 onStartJourney = viewModel::completeWelcome
             )

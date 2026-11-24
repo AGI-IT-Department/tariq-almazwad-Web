@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tariq-almazwad-pwa-v1';
+const CACHE_NAME = 'tariq-almazwad-pwa-v2';
 
 const PRECACHE_ASSETS = [
   '/',
@@ -7,11 +7,6 @@ const PRECACHE_ASSETS = [
   '/icon-192.png',
   '/icon-512.png',
   '/apple-touch-icon.png',
-  '/logo-challenge.png',
-  '/logo-church.png',
-  '/nativity-hero.jpg',
-  '/fonts/cairo.ttf',
-  '/fonts/amiri.ttf',
 ];
 
 self.addEventListener('install', (event) => {

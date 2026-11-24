@@ -18,7 +18,8 @@ export const App: React.FC = () => {
   const [showReminders, setShowReminders] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
-  const showYouthShell = !app.isLoading && !app.isAdminOpen && Boolean(app.activeUser);
+  const showYouthShell =
+    !app.isLoading && !app.isAdminOpen && app.hasSeenWelcome && Boolean(app.activeUser);
 
   return (
     <div dir="rtl" className="min-h-[100dvh] bg-parchment text-ink-deep">
@@ -75,7 +76,7 @@ export const App: React.FC = () => {
           onChangeAdminPin={app.changeAdminPin}
           onFeedback={app.showToast}
         />
-      ) : !app.hasSeenWelcome && !app.activeUser ? (
+      ) : !app.hasSeenWelcome ? (
         <WelcomeScreen onStartJourney={app.completeWelcome} />
       ) : !app.activeUser ? (
         <LoginScreen

@@ -1,7 +1,7 @@
 {
   "rewrites": [
     {
-      "source": "/((?!assets|fonts|sw\\.js|manifest\\.json|icon-192\\.png|icon-512\\.png|apple-touch-icon\\.png|logo-challenge\\.png|logo-church\\.png|nativity-hero\\.jpg).*)",
+      "source": "/((?!assets/|sw\\.js|manifest\\.json|icon-192\\.png|icon-512\\.png|apple-touch-icon\\.png).*)",
       "destination": "/index.html"
     }
   ],

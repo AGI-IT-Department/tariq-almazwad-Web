@@ -7,6 +7,7 @@ import {
   RefreshCw,
   ShieldCheck,
 } from 'lucide-react';
+import { APP_ASSETS } from '../lib/assets';
 
 interface AppHeaderProps {
   isSupabaseLive: boolean;
@@ -33,7 +34,11 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 flex-1 items-center gap-2.5">
             <img
-              src="/logo-challenge.png"
+              src={APP_ASSETS.challengeLogo}
+              onError={(e) => {
+                e.currentTarget.onerror = null;
+                e.currentTarget.src = APP_ASSETS.challengeLogoFallback;
+              }}
               alt="شعار تحدي طريق المزود"
               className="h-11 w-11 shrink-0 rounded-full object-contain ring-1 ring-gold-warm/40"
             />

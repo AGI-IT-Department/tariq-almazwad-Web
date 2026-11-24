@@ -1,5 +1,6 @@
 import React from 'react';
 import { ArrowLeft, Gift, Sparkles, Star } from 'lucide-react';
+import { APP_ASSETS } from '../lib/assets';
 
 interface WelcomeScreenProps {
   onStartJourney: () => void;
@@ -43,9 +44,13 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStartJourney }) 
         <div className="w-full rounded-[22px] border border-gold-warm/85 bg-white px-3.5 py-2.5 shadow-lg">
           <div className="flex items-center gap-3">
             <img
-              src="/logo-church.png"
+              src={APP_ASSETS.churchLogo}
+              onError={(e) => {
+                e.currentTarget.onerror = null;
+                e.currentTarget.src = APP_ASSETS.churchLogoFallback;
+              }}
               alt="شعار أسرة أبو سيفين للشباب الخريجين"
-              className="h-14 w-14 shrink-0 rounded-2xl object-contain"
+              className="h-14 w-14 shrink-0 rounded-2xl bg-white object-contain"
             />
             <div className="min-w-0 flex-1">
               <p className="text-sm font-bold text-midnight-dark">
@@ -69,7 +74,11 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStartJourney }) 
               }}
             />
             <img
-              src="/logo-challenge.png"
+              src={APP_ASSETS.challengeLogo}
+              onError={(e) => {
+                e.currentTarget.onerror = null;
+                e.currentTarget.src = APP_ASSETS.challengeLogoFallback;
+              }}
               alt="شعار تحدي طريق المزود صوم الميلاد 2026"
               className="relative h-52 w-52 rounded-full object-contain drop-shadow-xl"
             />
