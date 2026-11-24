@@ -33,6 +33,8 @@ import { SUPABASE_SQL_SCRIPT } from '../lib/supabaseSqlSchema';
 interface AdminDashboardScreenProps {
   isUnlocked: boolean;
   isSupabaseLive: boolean;
+  supabaseHost: string;
+  lastSyncError: string | null;
   pendingSubmissions: TaskSubmission[];
   leaderboard: LeaderboardEntry[];
   allUsersCount: number;
@@ -52,12 +54,15 @@ interface AdminDashboardScreenProps {
   onUpdateConfig: (config: AppConfig) => void;
   onExportCsv: () => void;
   onChangeAdminPin: (currentPin: string, newPin: string) => void;
+  onTestSupabase: () => Promise<{ ok: boolean; message: string }>;
   onFeedback: (msg: string) => void;
 }
 
 export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
   isUnlocked,
   isSupabaseLive,
+  supabaseHost,
+  lastSyncError,
   pendingSubmissions,
   leaderboard,
   allUsersCount,
@@ -77,6 +82,7 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
   onUpdateConfig,
   onExportCsv,
   onChangeAdminPin,
+  onTestSupabase,
   onFeedback,
 }) => {
   const [selectedTab, setSelectedTab] = useState(0);
@@ -190,10 +196,13 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
         {selectedTab === 3 && (
           <ExportAndSetupTab
             isSupabaseLive={isSupabaseLive}
+            supabaseHost={supabaseHost}
+            lastSyncError={lastSyncError}
             usersCount={allUsersCount}
             approvedCount={approvedSubmissionsCount}
             onExportCsv={onExportCsv}
             onShowSql={() => setShowSqlModal(true)}
+            onTestSupabase={onTestSupabase}
             onChangeAdminPin={onChangeAdminPin}
           />
         )}
@@ -737,21 +746,36 @@ const TasksAndQuizTab: React.FC<{
 /* ---------------- Tab 3: Export & Supabase Setup ---------------- */
 const ExportAndSetupTab: React.FC<{
   isSupabaseLive: boolean;
+  supabaseHost: string;
+  lastSyncError: string | null;
   usersCount: number;
   approvedCount: number;
   onExportCsv: () => void;
   onShowSql: () => void;
+  onTestSupabase: () => Promise<{ ok: boolean; message: string }>;
   onChangeAdminPin: (currentPin: string, newPin: string) => void;
 }> = ({
   isSupabaseLive,
+  supabaseHost,
+  lastSyncError,
   usersCount,
   approvedCount,
   onExportCsv,
   onShowSql,
+  onTestSupabase,
   onChangeAdminPin,
 }) => {
   const [currentPin, setCurrentPin] = useState('');
   const [newPin, setNewPin] = useState('');
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  const handleTest = async () => {
+    setTesting(true);
+    const res = await onTestSupabase();
+    setTestResult(res);
+    setTesting(false);
+  };
 
   return (
     <div className="space-y-3.5">
@@ -781,9 +805,29 @@ const ExportAndSetupTab: React.FC<{
         </div>
         <p className="text-xs leading-relaxed text-ink-muted">
           {isSupabaseLive
-            ? 'التطبيق متصل الآن بـ Supabase ويتم مزامنة كل المشاركات والنقاط حياً بين جميع الشباب والخادم.'
-            : 'أضف VITE_SUPABASE_URL و VITE_SUPABASE_ANON_KEY في إعدادات Vercel / Render لتفعيل المزامنة الحية.'}
+            ? `التطبيق مهيأ للاتصال بـ Supabase (${supabaseHost}) ومزامنة المشاركات والنقاط حياً.`
+            : 'أضف VITE_SUPABASE_URL و VITE_SUPABASE_ANON_KEY في إعدادات Vercel / Render ثم اضغط Redeploy لتفعيل المزامنة الحية.'}
         </p>
+        {(testResult || lastSyncError) && (
+          <div
+            className={`rounded-xl px-3 py-2.5 text-xs font-semibold leading-relaxed ${
+              testResult?.ok
+                ? 'bg-status-approvedBg text-status-approved'
+                : 'bg-status-rejectedBg text-status-rejected'
+            }`}
+          >
+            {testResult ? testResult.message : `آخر خطأ مزامنة: ${lastSyncError}`}
+          </div>
+        )}
+        <button
+          type="button"
+          disabled={testing}
+          onClick={handleTest}
+          className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-midnight text-sm font-bold text-white shadow transition hover:bg-midnight-dark disabled:opacity-60"
+        >
+          <Database className="h-4 w-4" />
+          <span>{testing ? 'جاري فحص الاتصال...' : 'اختبار الاتصال بقاعدة البيانات الآن'}</span>
+        </button>
         <button
           type="button"
           onClick={onShowSql}

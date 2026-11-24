@@ -40,8 +40,17 @@ function sanitizeAnonKey(raw: string): string {
     .trim();
 }
 
-const rawUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.SUPABASE_URL || '';
-const rawKey = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.SUPABASE_ANON_KEY || '';
+const rawUrl =
+  import.meta.env.VITE_SUPABASE_URL ||
+  import.meta.env.NEXT_PUBLIC_SUPABASE_URL ||
+  import.meta.env.SUPABASE_URL ||
+  '';
+const rawKey =
+  import.meta.env.VITE_SUPABASE_ANON_KEY ||
+  import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  import.meta.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+  import.meta.env.SUPABASE_ANON_KEY ||
+  '';
 
 class SupabaseRestClient {
   private readonly baseUrl: string = sanitizeSupabaseUrl(rawUrl);
@@ -54,6 +63,37 @@ class SupabaseRestClient {
       this.anonKey.length > 0 &&
       !this.anonKey.includes('YOUR_SUPABASE_ANON_KEY')
     );
+  }
+
+  get projectHost(): string {
+    try {
+      return new URL(this.baseUrl).host;
+    } catch {
+      return '';
+    }
+  }
+
+  async testConnection(): Promise<{ ok: boolean; message: string }> {
+    if (!this.isConfigured) {
+      return {
+        ok: false,
+        message:
+          'متغيرات البيئة (VITE_SUPABASE_URL و VITE_SUPABASE_ANON_KEY) غير موجودة في هذه النسخة من الموقع — أضفها في Vercel ثم اضغط Redeploy.',
+      };
+    }
+    try {
+      const [users, tasks] = await Promise.all([this.fetchUsers(), this.fetchTasks()]);
+      return {
+        ok: true,
+        message: `✅ الاتصال بـ Supabase يعمل بنجاح (${this.projectHost}) — المشاركون: ${users.length} • المهام: ${tasks.length}`,
+      };
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      return {
+        ok: false,
+        message: `❌ فشل الاتصال بـ Supabase: ${detail}`,
+      };
+    }
   }
 
   private buildUrl(table: string, params: Record<string, string> = {}): string {

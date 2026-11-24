@@ -35,8 +35,8 @@ function pwaIconsPlugin(): Plugin {
 
 export default defineConfig({
   plugins: [react(), pwaIconsPlugin()],
-  // Allow both standard Vite env vars (VITE_SUPABASE_*) and existing SUPABASE_* env vars
-  envPrefix: ['VITE_', 'SUPABASE_'],
+  // Allow standard Vite, Supabase, and Vercel/Next.js Supabase integration env prefixes
+  envPrefix: ['VITE_', 'SUPABASE_', 'NEXT_PUBLIC_'],
   build: {
     outDir: 'dist',
     sourcemap: false,

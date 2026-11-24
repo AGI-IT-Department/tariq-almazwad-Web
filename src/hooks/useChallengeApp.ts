@@ -90,6 +90,7 @@ export function useChallengeApp() {
   const [selectedTab, setSelectedTab] = useState<YouthTab>('daily');
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [isAdminUnlocked, setIsAdminUnlocked] = useState(false);
+  const [lastSyncError, setLastSyncError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const toastTimerRef = useRef<number | null>(null);
 
@@ -125,10 +126,12 @@ export function useChallengeApp() {
         setAppConfig(remoteConfig);
         localStore.saveAppConfig(remoteConfig);
       }
+      setLastSyncError(null);
       return true;
     } catch (err) {
+      const msg = err instanceof Error ? err.message : 'تعذر الاتصال بالخادم';
+      setLastSyncError(msg);
       if (!silent) {
-        const msg = err instanceof Error ? err.message : 'تعذر الاتصال بالخادم';
         showToast(`تعذر التحديث: ${msg}`);
       }
       return false;
@@ -712,10 +715,24 @@ export function useChallengeApp() {
     showToast(`${title} ${appConfig.dailyVerseText}`);
   }, [appConfig, showToast]);
 
+  const testSupabaseConnection = useCallback(async () => {
+    const res = await supabaseClient.testConnection();
+    if (res.ok) {
+      setLastSyncError(null);
+      await syncFromSupabase(true);
+    } else {
+      setLastSyncError(res.message);
+    }
+    showToast(res.message);
+    return res;
+  }, [showToast, syncFromSupabase]);
+
   return {
     isLoading,
     isSyncing,
     isSupabaseLive,
+    supabaseHost: supabaseClient.projectHost,
+    lastSyncError,
     activeUser,
     allUsers: users,
     allTasks: tasks,
@@ -754,5 +771,6 @@ export function useChallengeApp() {
     exportLeaderboardCsv,
     updateReminders,
     sendTestEncouragement,
+    testSupabaseConnection,
   };
 }

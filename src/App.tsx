@@ -53,6 +53,8 @@ export const App: React.FC = () => {
         <AdminDashboardScreen
           isUnlocked={app.isAdminUnlocked}
           isSupabaseLive={app.isSupabaseLive}
+          supabaseHost={app.supabaseHost}
+          lastSyncError={app.lastSyncError}
           pendingSubmissions={app.pendingSubmissions}
           leaderboard={app.leaderboard}
           allUsersCount={app.allUsers.length}
@@ -74,6 +76,7 @@ export const App: React.FC = () => {
           onUpdateConfig={app.updateAppConfig}
           onExportCsv={app.exportLeaderboardCsv}
           onChangeAdminPin={app.changeAdminPin}
+          onTestSupabase={app.testSupabaseConnection}
           onFeedback={app.showToast}
         />
       ) : !app.hasSeenWelcome ? (
