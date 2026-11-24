@@ -1,0 +1,8 @@
+{
+  "name": "WEB تحدي طريق المزود",
+  "description": "تطبيق تحدي طريق المزود لصوم الميلاد المجيد لاجتماع أبو سيفين للشباب الخريجين بالشارقة لمتابعة المهام الروحية اليومية والأسبوعية ولوحة الأبطال واعتماد النقاط من الخادم عبر Supabase.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

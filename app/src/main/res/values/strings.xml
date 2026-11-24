@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">تحدي طريق المزود</string>
+    <string name="app_subtitle">صوم الميلاد المجيد • اجتماع أبو سيفين للشباب الخريجين</string>
+    <string name="church_location">كنيسة الشهيد أبي سيفين بالشارقة</string>
+    <string name="fast_period">30/11/2026 — 5/1/2027</string>
+    <string name="notification_channel_name">تنبيهات تحدي طريق المزود</string>
+    <string name="notification_channel_desc">تذكيرات يومية للصلوات والمهام الروحية خلال صوم الميلاد المجيد</string>
+</resources>

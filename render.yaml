@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: tariq-almazwad-pwa
+    runtime: static
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    headers:
+      - path: /sw.js
+        name: Cache-Control
+        value: no-cache, no-store, must-revalidate
+      - path: /manifest.json
+        name: Content-Type
+        value: application/manifest+json; charset=utf-8
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

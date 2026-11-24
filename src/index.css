@@ -1,0 +1,108 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@font-face {
+  font-family: 'Cairo';
+  src: url('/fonts/cairo.ttf') format('truetype');
+  font-weight: 400 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Amiri';
+  src: url('/fonts/amiri.ttf') format('truetype');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+html,
+body {
+  font-family: 'Cairo', system-ui, -apple-system, sans-serif;
+  background-color: #FAF6EE;
+  color: #13262F;
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+
+.font-amiri {
+  font-family: 'Amiri', Georgia, serif;
+}
+
+.safe-pt {
+  padding-top: max(12px, var(--safe-top));
+}
+
+.safe-pb {
+  padding-bottom: max(10px, var(--safe-bottom));
+}
+
+/* Subtle Bethlehem star twinkle & halo pulse */
+@keyframes twinkle {
+  0%, 100% {
+    opacity: 0.25;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 0.92;
+    transform: scale(1.15);
+  }
+}
+
+@keyframes haloPulse {
+  0%, 100% {
+    opacity: 0.24;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 0.48;
+    transform: scale(1.04);
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-twinkle {
+  animation: twinkle 2.2s ease-in-out infinite;
+}
+
+.animate-twinkle-alt {
+  animation: twinkle 2.6s ease-in-out 0.9s infinite;
+}
+
+.animate-halo {
+  animation: haloPulse 2.4s ease-in-out infinite;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.26s ease-out both;
+}
+
+/* Hide scrollbars cleanly for horizontal filter chips */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

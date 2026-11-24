@@ -1,0 +1,29 @@
+{
+  "name": "تحدي طريق المزود",
+  "short_name": "طريق المزود",
+  "description": "تحدي طريق المزود لصوم الميلاد المجيد — اجتماع أبو سيفين للشباب الخريجين بالشارقة",
+  "dir": "rtl",
+  "lang": "ar",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "portrait",
+  "theme_color": "#13313D",
+  "background_color": "#FAF6EE",
+  "categories": ["lifestyle", "productivity"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
