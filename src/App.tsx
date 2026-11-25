@@ -29,6 +29,7 @@ export const App: React.FC = () => {
         <RemindersModal
           settings={app.reminderSettings}
           onUpdateSettings={app.updateReminders}
+          onSendTestBible={app.sendTestBibleReminder}
           onSendTest={app.sendTestEncouragement}
           onDismiss={() => setShowReminders(false)}
         />
@@ -104,8 +105,10 @@ export const App: React.FC = () => {
                 allTasks={app.allTasks}
                 userSubmissions={app.userSubmissions}
                 appConfig={app.appConfig}
+                reminderSettings={app.reminderSettings}
                 onSubmitTask={app.submitTask}
                 onOpenMyRank={() => app.setSelectedTab('my_rank')}
+                onOpenReminders={() => setShowReminders(true)}
                 onLogout={() => setShowLogoutConfirm(true)}
                 onFeedback={app.showToast}
               />

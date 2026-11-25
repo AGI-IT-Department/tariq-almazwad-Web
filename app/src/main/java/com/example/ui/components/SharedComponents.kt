@@ -443,11 +443,12 @@ fun DailyVerseBanner(
 @Composable
 fun TaskSubmissionBottomSheet(
     task: ChallengeTask,
+    initialNote: String = "",
     onDismiss: () -> Unit,
     onConfirmSubmit: (String) -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var note by remember { mutableStateOf("") }
+    var note by remember(task.id, initialNote) { mutableStateOf(initialNote) }
     val freq = TaskFrequency.fromKey(task.frequency)
     val periodLabel = FastCalendar.periodLabelForTask(freq, FastDate.today())
 

@@ -5,9 +5,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.AppConfigEntity
 import com.example.data.AppDatabase
+import com.example.data.BibleReadingPlan
 import com.example.data.ChallengeRepository
 import com.example.data.ChallengeTask
-import com.example.data.CsvExporter
+import com.example.data.ExcelExporter
 import com.example.data.FastDate
 import com.example.data.LeaderboardEntry
 import com.example.data.PreferencesManager
@@ -145,11 +146,23 @@ class ChallengeViewModel(application: Application) : AndroidViewModel(applicatio
             ReminderScheduler.applyAllReminders(appContext, settings)
         }
 
+        // Listen for newly approved points from Supabase and alert the user immediately
+        viewModelScope.launch {
+            repository.pointsApprovalEvents.collect { notice ->
+                ReminderScheduler.showPointsApprovedNotification(
+                    context = appContext,
+                    title = notice.title,
+                    message = notice.body
+                )
+                emitMessage("🎉 ${notice.body}")
+            }
+        }
+
         // Background real-time polling when Supabase is configured
         if (repository.isSupabaseLive) {
             viewModelScope.launch {
                 while (isActive) {
-                    delay(20_000L)
+                    delay(15_000L)
                     repository.syncFromSupabase()
                 }
             }
@@ -334,17 +347,43 @@ class ChallengeViewModel(application: Application) : AndroidViewModel(applicatio
             emitMessage("لا يوجد مشاركون لتصدير التقرير بعد")
             return
         }
-        val result = CsvExporter.exportAndShareCsv(appContext, entries)
+        val result = ExcelExporter.exportAndShareExcel(appContext, entries)
         result.onSuccess { emitMessage(it) }
             .onFailure { emitMessage("تعذر تصدير ملف التقرير: ${it.message}") }
     }
 
     fun updateReminders(settings: ReminderSettings) {
         viewModelScope.launch {
-            repository.saveReminderSettings(settings)
-            ReminderScheduler.applyAllReminders(appContext, settings)
-            emitMessage("تم حفظ مواعيد التنبيهات اليومية")
+            val prev = uiState.value.reminderSettings
+            val todayIso = FastDate.today().toIsoString()
+            val normalized = if (settings.bibleBookId != prev.bibleBookId || settings.bibleStartDateIso.isBlank()) {
+                settings.copy(bibleStartDateIso = todayIso)
+            } else {
+                settings
+            }
+            repository.saveReminderSettings(normalized)
+            ReminderScheduler.applyAllReminders(appContext, normalized)
+            emitMessage("تم حفظ مواعيد الإشعارات وورد الكتاب المقدس ✅")
         }
+    }
+
+    fun sendTestBibleReminder() {
+        val settings = uiState.value.reminderSettings
+        val reading = BibleReadingPlan.getTodayReading(
+            startBookId = settings.bibleBookId,
+            startDateIso = settings.bibleStartDateIso
+        )
+        val (title, body) = BibleReadingPlan.formatReminderNotification(reading)
+        val ok = ReminderScheduler.showNotificationNow(
+            context = appContext,
+            notificationId = ReminderScheduler.ID_INSTANT_BIBLE_TEST,
+            title = title,
+            message = body
+        )
+        emitMessage(
+            if (ok) "تم إرسال إشعار ورد اليوم (${reading.bookNameAr} - إصحاح ${reading.chapterNumber})"
+            else "يرجى تفعيل صلاحية الإشعارات أولاً"
+        )
     }
 
     fun sendTestEncouragement() {

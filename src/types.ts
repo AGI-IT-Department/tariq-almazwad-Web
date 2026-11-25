@@ -57,6 +57,15 @@ export interface AppConfig {
 }
 
 export interface ReminderSettings {
+  pointsApprovalEnabled: boolean;
+  dailyTasksReminderEnabled: boolean;
+  dailyTasksReminderHour: number;
+  dailyTasksReminderMinute: number;
+  bibleReadingReminderEnabled: boolean;
+  bibleBookId: string;
+  bibleReadingHour: number;
+  bibleReadingMinute: number;
+  bibleStartDateIso: string;
   morningPrayerEnabled: boolean;
   morningPrayerHour: number;
   morningPrayerMinute: number;
@@ -111,6 +120,15 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
 };
 
 export const DEFAULT_REMINDER_SETTINGS: ReminderSettings = {
+  pointsApprovalEnabled: true,
+  dailyTasksReminderEnabled: true,
+  dailyTasksReminderHour: 20,
+  dailyTasksReminderMinute: 0,
+  bibleReadingReminderEnabled: true,
+  bibleBookId: 'luke',
+  bibleReadingHour: 8,
+  bibleReadingMinute: 0,
+  bibleStartDateIso: '',
   morningPrayerEnabled: true,
   morningPrayerHour: 7,
   morningPrayerMinute: 30,

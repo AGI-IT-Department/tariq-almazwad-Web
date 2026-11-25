@@ -98,6 +98,7 @@ fun TariqAlMazwadApp(
         RemindersDialog(
             settings = uiState.reminderSettings,
             onUpdateSettings = viewModel::updateReminders,
+            onSendTestBible = viewModel::sendTestBibleReminder,
             onSendTest = viewModel::sendTestEncouragement,
             onDismiss = { showRemindersDialog = false }
         )
@@ -254,6 +255,7 @@ fun TariqAlMazwadApp(
                                 uiState = uiState,
                                 onSubmitTask = viewModel::submitTask,
                                 onOpenMyRank = { viewModel.selectTab(YouthTab.MY_RANK) },
+                                onOpenReminders = { showRemindersDialog = true },
                                 onLogout = { showLogoutDialog = true }
                             )
                             YouthTab.MY_LOG -> MyLogScreen(

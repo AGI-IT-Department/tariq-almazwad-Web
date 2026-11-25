@@ -731,7 +731,7 @@ const ExportAndSetupTab: React.FC<{
         <p className="text-xs leading-relaxed text-ink-muted">
           عدد المشاركين: {usersCount} • المهام المعتمدة: {approvedCount}.
           <br />
-          يُصدّر ملف CSV جاهز للفتح في Microsoft Excel باللغة العربية.
+          يُصدّر ملف Excel (.xlsx) منسّق بالألوان والفلاتر ومؤشر النقاط جاهز للفتح في Microsoft Excel باللغة العربية.
         </p>
         <button
           type="button"
@@ -739,7 +739,7 @@ const ExportAndSetupTab: React.FC<{
           className="flex h-[52px] w-full items-center justify-center gap-2 rounded-2xl bg-burgundy text-sm font-bold text-white shadow transition hover:opacity-95"
         >
           <Download className="h-5 w-5" />
-          <span>تصدير لوحة الأبطال والنقاط (CSV / Excel)</span>
+          <span>تصدير لوحة الأبطال والنقاط (Excel منسّق)</span>
         </button>
       </div>
 

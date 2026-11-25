@@ -1,22 +1,28 @@
 import React, { useMemo, useState } from 'react';
 import {
+  BellRing,
+  BookOpen,
   CheckCircle2,
+  Clock,
   ExternalLink,
   HelpCircle,
   Hourglass,
   LogOut,
   Trophy,
+  X,
 } from 'lucide-react';
 import {
   type AppConfig,
   type ChallengeTask,
   type LeaderboardEntry,
+  type ReminderSettings,
   type TaskFrequency,
   type TaskSubmission,
   type YouthUser,
   FREQUENCY_LABELS,
 } from '../types';
-import { FastCalendar, todayFastDate } from '../lib/fastCalendar';
+import { FastCalendar, formatTimeArabic, todayFastDate } from '../lib/fastCalendar';
+import { getTodayBibleReading } from '../lib/bibleReadingPlan';
 import {
   UrlValidator,
   openSafeExternalUrl,
@@ -29,6 +35,12 @@ import {
   TaskSubmissionSheet,
 } from '../components/SharedUi';
 import { APP_ASSETS } from '../lib/assets';
+import {
+  getNotificationPermission,
+  isNotificationSupported,
+  requestBrowserNotificationPermission,
+} from '../lib/notifications';
+import { localStore } from '../lib/storage';
 
 interface DailyTasksScreenProps {
   user: YouthUser;
@@ -36,8 +48,10 @@ interface DailyTasksScreenProps {
   allTasks: ChallengeTask[];
   userSubmissions: TaskSubmission[];
   appConfig: AppConfig;
+  reminderSettings: ReminderSettings;
   onSubmitTask: (task: ChallengeTask, note: string) => void;
   onOpenMyRank: () => void;
+  onOpenReminders: () => void;
   onLogout: () => void;
   onFeedback: (msg: string) => void;
 }
@@ -57,8 +71,10 @@ export const DailyTasksScreen: React.FC<DailyTasksScreenProps> = ({
   allTasks,
   userSubmissions,
   appConfig,
+  reminderSettings,
   onSubmitTask,
   onOpenMyRank,
+  onOpenReminders,
   onLogout,
   onFeedback,
 }) => {
@@ -73,6 +89,50 @@ export const DailyTasksScreen: React.FC<DailyTasksScreenProps> = ({
 
   const [selectedFilter, setSelectedFilter] = useState<TaskFilter>('all');
   const [selectedTaskForSheet, setSelectedTaskForSheet] = useState<ChallengeTask | null>(null);
+  const [sheetInitialNote, setSheetInitialNote] = useState('');
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission>(() =>
+    getNotificationPermission()
+  );
+  const [notifPromptDismissed, setNotifPromptDismissed] = useState<boolean>(() =>
+    localStore.isNotifPromptDismissed()
+  );
+
+  const todayBibleReading = useMemo(
+    () =>
+      getTodayBibleReading(
+        reminderSettings.bibleBookId,
+        reminderSettings.bibleStartDateIso,
+        today
+      ),
+    [reminderSettings.bibleBookId, reminderSettings.bibleStartDateIso, today]
+  );
+
+  const bibleTask = useMemo(
+    () => allTasks.find((t) => t.id === 'task_bible_reading' && t.isActive) ?? null,
+    [allTasks]
+  );
+  const bibleTaskSubToday = useMemo(() => {
+    if (!bibleTask) return null;
+    const pk = FastCalendar.periodKeyForTask(bibleTask.frequency, today);
+    return userSubmissions.find((s) => s.taskId === bibleTask.id && s.periodKey === pk) ?? null;
+  }, [bibleTask, userSubmissions, today]);
+  const isBibleTaskLocked =
+    isAfterEnd ||
+    bibleTaskSubToday?.status === 'pending' ||
+    bibleTaskSubToday?.status === 'approved';
+
+  const showNotifPrompt =
+    isNotificationSupported() && notifPermission === 'default' && !notifPromptDismissed;
+
+  const handleEnableNotifications = async () => {
+    const result = await requestBrowserNotificationPermission();
+    setNotifPermission(result);
+    if (result === 'granted') {
+      onFeedback('تم تفعيل الإشعارات بنجاح! سيصلك تنبيه فوري عند اعتماد نقاطك 🎉');
+    } else {
+      onFeedback('يمكنك تفعيل الإشعارات لاحقاً من أيقونة الجرس بالأعلى');
+    }
+  };
 
   const activeTasks = useMemo(
     () => allTasks.filter((t) => t.isActive).sort((a, b) => a.sortOrder - b.sortOrder),
@@ -110,10 +170,15 @@ export const DailyTasksScreen: React.FC<DailyTasksScreenProps> = ({
       {selectedTaskForSheet && (
         <TaskSubmissionSheet
           task={selectedTaskForSheet}
-          onDismiss={() => setSelectedTaskForSheet(null)}
+          initialNote={sheetInitialNote}
+          onDismiss={() => {
+            setSelectedTaskForSheet(null);
+            setSheetInitialNote('');
+          }}
           onConfirmSubmit={(note) => {
             onSubmitTask(selectedTaskForSheet, note);
             setSelectedTaskForSheet(null);
+            setSheetInitialNote('');
           }}
         />
       )}
@@ -206,6 +271,39 @@ export const DailyTasksScreen: React.FC<DailyTasksScreenProps> = ({
         </div>
       </section>
 
+      {/* One-tap Points Approval Notification Prompt */}
+      {showNotifPrompt && (
+        <section className="flex items-center gap-3 rounded-[20px] border border-gold-warm/45 bg-white p-3.5 shadow-sm">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-status-pendingBg text-gold-warm">
+            <BellRing className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-bold text-ink-deep">فعّل إشعارات اعتماد النقاط</p>
+            <p className="mt-0.5 text-[11px] leading-snug text-ink-muted">
+              يصلك تنبيه فوري بمجرد اعتماد خدام التحدي لمهامك وإضافة نقاطك الجديدة
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleEnableNotifications}
+            className="shrink-0 rounded-xl bg-midnight px-3 py-2 text-xs font-bold text-white transition hover:bg-midnight-dark active:scale-95"
+          >
+            تفعيل
+          </button>
+          <button
+            type="button"
+            aria-label="إخفاء"
+            onClick={() => {
+              localStore.dismissNotifPrompt();
+              setNotifPromptDismissed(true);
+            }}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-muted hover:bg-parchment-variant"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </section>
+      )}
+
       {/* Challenge Window / Trial Mode Banner */}
       {!isWithinWindow && (
         <section
@@ -267,6 +365,57 @@ export const DailyTasksScreen: React.FC<DailyTasksScreenProps> = ({
           onFeedback(msg);
         }}
       />
+
+      {/* Daily Bible Chapter & Personal Reminder Card */}
+      <section className="rounded-[22px] border border-midnight/20 bg-white p-4 shadow-sm">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-midnight text-gold-bright shadow-sm">
+              <BookOpen className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-gold-warm">ورد الكتاب المقدس اليوم 📖</p>
+              <h3 className="mt-0.5 text-base font-extrabold text-ink-deep">
+                {todayBibleReading.bookNameAr} — الإصحاح {todayBibleReading.chapterNumber}
+              </h3>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-ink-muted">
+                <span className="inline-flex items-center gap-1">
+                  <Clock className="h-3.5 w-3.5 text-midnight" />
+                  القراءة: {formatTimeArabic(reminderSettings.bibleReadingHour, reminderSettings.bibleReadingMinute)}
+                </span>
+                <span>•</span>
+                <span>
+                  الإنجازات: {formatTimeArabic(reminderSettings.dailyTasksReminderHour, reminderSettings.dailyTasksReminderMinute)}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {bibleTask && !isBibleTaskLocked && (
+            <button
+              type="button"
+              onClick={() => {
+                setSheetInitialNote(
+                  `تمت قراءة ${todayBibleReading.bookNameAr} — الإصحاح ${todayBibleReading.chapterNumber}`
+                );
+                setSelectedTaskForSheet(bibleTask);
+              }}
+              className="flex-1 rounded-xl bg-midnight px-3 py-2.5 text-xs font-bold text-white transition hover:bg-midnight-dark active:scale-[0.99]"
+            >
+              سجّل قراءة الإصحاح (+{bibleTask.points} نقطة)
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onOpenReminders}
+            className="rounded-xl border border-midnight/25 px-3 py-2.5 text-xs font-bold text-midnight transition hover:bg-parchment-variant"
+          >
+            تغيير السفر والوقت ⏰
+          </button>
+        </div>
+      </section>
 
       {/* Category Filter Chips */}
       <div className="space-y-2 pt-1">

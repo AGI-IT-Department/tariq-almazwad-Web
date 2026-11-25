@@ -119,16 +119,18 @@ export const DailyVerseBanner: React.FC<DailyVerseBannerProps> = ({
 
 interface TaskSubmissionSheetProps {
   task: ChallengeTask;
+  initialNote?: string;
   onDismiss: () => void;
   onConfirmSubmit: (note: string) => void;
 }
 
 export const TaskSubmissionSheet: React.FC<TaskSubmissionSheetProps> = ({
   task,
+  initialNote = '',
   onDismiss,
   onConfirmSubmit,
 }) => {
-  const [note, setNote] = useState('');
+  const [note, setNote] = useState(initialNote);
   const periodLabel = FastCalendar.periodLabelForTask(task.frequency, todayFastDate());
 
   return (

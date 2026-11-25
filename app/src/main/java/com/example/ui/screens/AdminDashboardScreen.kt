@@ -1249,7 +1249,7 @@ private fun AdminExportAndSetupTab(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "عدد المشاركين: $usersCount • المهام المعتمدة: $approvedCount.\nيُصدّر ملف CSV جاهز للفتح في Microsoft Excel باللغة العربية.",
+                        text = "عدد المشاركين: $usersCount • المهام المعتمدة: $approvedCount.\nيُصدّر ملف Excel (.xlsx) منسّق بالألوان والفلاتر ومؤشر النقاط جاهز للفتح في Microsoft Excel باللغة العربية.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1264,7 +1264,7 @@ private fun AdminExportAndSetupTab(
                     ) {
                         Icon(Icons.Filled.Download, contentDescription = null, tint = Color.White)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("تصدير لوحة الأبطال والنقاط (CSV / Excel)", color = Color.White)
+                        Text("تصدير لوحة الأبطال والنقاط (Excel منسّق)", color = Color.White)
                     }
                 }
             }

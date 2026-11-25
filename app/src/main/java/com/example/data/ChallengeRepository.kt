@@ -1,8 +1,18 @@
 package com.example.data
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import java.util.UUID
+
+data class PointsApprovalNotice(
+    val title: String,
+    val body: String,
+    val addedPoints: Int
+)
 
 data class LeaderboardEntry(
     val rank: Int,
@@ -33,6 +43,9 @@ class ChallengeRepository(
     val activeUserId: Flow<String?> = preferences.activeUserIdFlow
     val hasSeenWelcome: Flow<Boolean> = preferences.hasSeenWelcomeFlow
     val reminderSettings: Flow<ReminderSettings> = preferences.reminderSettingsFlow
+
+    private val _pointsApprovalEvents = MutableSharedFlow<PointsApprovalNotice>(extraBufferCapacity = 6)
+    val pointsApprovalEvents: SharedFlow<PointsApprovalNotice> = _pointsApprovalEvents.asSharedFlow()
 
     suspend fun initializeAndSync(): Result<Unit> {
         if (taskDao.countTasks() == 0) {
@@ -67,7 +80,83 @@ class ChallengeRepository(
             if (remoteConfig != null) {
                 configDao.upsert(remoteConfig)
             }
+            checkAndEmitPointsApproval(remoteUsers, remoteSubs)
         }
+    }
+
+    private suspend fun checkAndEmitPointsApproval(
+        remoteUsers: List<YouthUser>,
+        remoteSubs: List<TaskSubmission>
+    ) {
+        val activeUid = preferences.activeUserIdFlow.first() ?: return
+        val user = remoteUsers.firstOrNull { it.id == activeUid } ?: return
+        val userApproved = remoteSubs.filter {
+            it.userId == activeUid && it.status == SubmissionStatus.APPROVED.key
+        }
+        val currentApprovedIds = userApproved.map { it.id }.toSet()
+        val prev = preferences.getApprovalSnapshot(activeUid)
+
+        // First sync for this user on this device: establish baseline silently
+        if (prev == null) {
+            preferences.saveApprovalSnapshot(
+                activeUid,
+                ApprovalSnapshot(currentApprovedIds, user.bonusPoints)
+            )
+            return
+        }
+
+        val newlyApprovedTasks = userApproved.filter {
+            it.id !in prev.seenApprovedIds && it.points > 0
+        }
+        val taskPointsAdded = newlyApprovedTasks.sumOf { it.points }
+        val bonusDelta = (user.bonusPoints - prev.lastBonusPoints).coerceAtLeast(0)
+        val totalAddedPoints = taskPointsAdded + bonusDelta
+
+        // Always update stored snapshot so approvals never notify twice
+        preferences.saveApprovalSnapshot(
+            activeUid,
+            ApprovalSnapshot(currentApprovedIds, user.bonusPoints)
+        )
+
+        if (totalAddedPoints <= 0) return
+        if (!preferences.getReminderSettingsSnapshot().pointsApprovalEnabled) return
+
+        val today = FastDate.today()
+        val isTrialNow = FastCalendar.isTrialMode(today)
+        val countedApproved = if (isTrialNow) {
+            userApproved
+        } else {
+            userApproved.filter { FastCalendar.isOfficialSubmission(it) }
+        }
+        val totalPointsNow = (countedApproved.sumOf { it.points } + user.bonusPoints).coerceAtLeast(0)
+
+        val (title, body) = when {
+            newlyApprovedTasks.size == 1 && bonusDelta == 0 -> {
+                val task = newlyApprovedTasks.first()
+                "مبروك! تم اعتماد نقاطك ✨" to
+                    "تم اعتماد «${task.taskTitle}» وإضافة +${task.points} نقطة لرصيدك (الإجمالي: $totalPointsNow نقطة)"
+            }
+            newlyApprovedTasks.size > 1 && bonusDelta == 0 -> {
+                "مبروك! تم اعتماد ${newlyApprovedTasks.size} مهام جديدة 🎉" to
+                    "تمت إضافة +$taskPointsAdded نقطة جديدة إلى رصيدك (الإجمالي: $totalPointsNow نقطة)"
+            }
+            newlyApprovedTasks.isEmpty() && bonusDelta > 0 -> {
+                "مكافأة نقاط جديدة من خدام التحدي 🎁" to
+                    "تمت إضافة +$bonusDelta نقطة بونص إلى رصيدك! (الإجمالي: $totalPointsNow نقطة)"
+            }
+            else -> {
+                "مبروك! نقاط جديدة معتمدة 🎉" to
+                    "تمت إضافة +$totalAddedPoints نقطة جديدة إلى رصيدك في تحدي طريق المزود (الإجمالي: $totalPointsNow نقطة)"
+            }
+        }
+
+        _pointsApprovalEvents.tryEmit(
+            PointsApprovalNotice(
+                title = title,
+                body = body,
+                addedPoints = totalAddedPoints
+            )
+        )
     }
 
     suspend fun loginOrRegisterYouth(
@@ -114,6 +203,10 @@ class ChallengeRepository(
             }
             userDao.upsert(newUser)
             preferences.setActiveUserId(newUser.id)
+            preferences.saveApprovalSnapshot(
+                newUser.id,
+                ApprovalSnapshot(emptySet(), 0)
+            )
             Result.success("تم تسجيلك بنجاح يا $cleanName! أهلاً بك في تحدي طريق المزود")
         }
     }

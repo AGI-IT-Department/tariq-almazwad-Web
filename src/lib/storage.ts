@@ -20,7 +20,15 @@ const KEYS = {
   ADMIN_PIN_HASH: 'tariq_admin_pin_hash_v1',
   REMINDERS: 'tariq_reminders_v1',
   INSTALL_BANNER_DISMISSED: 'tariq_install_banner_dismissed_v1',
+  APPROVAL_SNAPSHOTS: 'tariq_approval_snapshots_v1',
+  NOTIF_PROMPT_DISMISSED: 'tariq_notif_prompt_dismissed_v1',
+  FIRED_REMINDERS: 'tariq_fired_reminders_v1',
 } as const;
+
+export interface ApprovalSnapshot {
+  seenApprovedIds: string[];
+  lastBonusPoints: number;
+}
 
 export const DEFAULT_ADMIN_PIN = '2026';
 
@@ -146,6 +154,58 @@ export const localStore = {
       localStorage.setItem(KEYS.INSTALL_BANNER_DISMISSED, 'true');
     } catch {
       // ignore
+    }
+  },
+
+  getApprovalSnapshot(userId: string): ApprovalSnapshot | null {
+    const map = readJson<Record<string, ApprovalSnapshot>>(KEYS.APPROVAL_SNAPSHOTS, {});
+    return map[userId] ?? null;
+  },
+  saveApprovalSnapshot(userId: string, snapshot: ApprovalSnapshot): void {
+    const map = readJson<Record<string, ApprovalSnapshot>>(KEYS.APPROVAL_SNAPSHOTS, {});
+    map[userId] = snapshot;
+    writeJson(KEYS.APPROVAL_SNAPSHOTS, map);
+  },
+
+  isNotifPromptDismissed(): boolean {
+    try {
+      return localStorage.getItem(KEYS.NOTIF_PROMPT_DISMISSED) === 'true';
+    } catch {
+      return false;
+    }
+  },
+  dismissNotifPrompt(): void {
+    try {
+      localStorage.setItem(KEYS.NOTIF_PROMPT_DISMISSED, 'true');
+    } catch {
+      // ignore
+    }
+  },
+
+  hasFiredReminderToday(dateIso: string, reminderKey: string): boolean {
+    const map = readJson<Record<string, boolean>>(KEYS.FIRED_REMINDERS, {});
+    return Boolean(map[`${dateIso}:${reminderKey}`]);
+  },
+
+  markReminderFiredToday(dateIso: string, reminderKey: string): void {
+    const map = readJson<Record<string, boolean>>(KEYS.FIRED_REMINDERS, {});
+    // Keep only today's entries to prevent unbounded growth
+    const pruned: Record<string, boolean> = {};
+    for (const [k, v] of Object.entries(map)) {
+      if (k.startsWith(`${dateIso}:`) && v) {
+        pruned[k] = true;
+      }
+    }
+    pruned[`${dateIso}:${reminderKey}`] = true;
+    writeJson(KEYS.FIRED_REMINDERS, pruned);
+  },
+
+  clearFiredReminderToday(dateIso: string, reminderKey: string): void {
+    const map = readJson<Record<string, boolean>>(KEYS.FIRED_REMINDERS, {});
+    const fullKey = `${dateIso}:${reminderKey}`;
+    if (fullKey in map) {
+      delete map[fullKey];
+      writeJson(KEYS.FIRED_REMINDERS, map);
     }
   },
 };

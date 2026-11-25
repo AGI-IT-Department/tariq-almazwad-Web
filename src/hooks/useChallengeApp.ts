@@ -11,13 +11,23 @@ import {
 } from '../types';
 import { FastCalendar, todayFastDate, toIsoString } from '../lib/fastCalendar';
 import {
-  CsvExporter,
   PinHasher,
   UrlValidator,
   generateUuid,
 } from '../lib/securityAndExport';
+import { ExcelExporter } from '../lib/excelExporter';
 import { localStore } from '../lib/storage';
 import { supabaseClient } from '../lib/supabaseClient';
+import {
+  formatBibleReminderNotification,
+  getTodayBibleReading,
+} from '../lib/bibleReadingPlan';
+import {
+  checkAndFireScheduledReminders,
+  detectNewApprovedPoints,
+  requestBrowserNotificationPermission,
+  showLocalOrSwNotification,
+} from '../lib/notifications';
 
 export interface ToastMessage {
   id: number;
@@ -93,13 +103,33 @@ export function useChallengeApp() {
   const [lastSyncError, setLastSyncError] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const toastTimerRef = useRef<number | null>(null);
+  const activeUserIdRef = useRef<string | null>(activeUserId);
+  const reminderSettingsRef = useRef<ReminderSettings>(reminderSettings);
+  const tasksRef = useRef<ChallengeTask[]>(tasks);
+  const submissionsRef = useRef<TaskSubmission[]>(submissions);
+
+  useEffect(() => {
+    activeUserIdRef.current = activeUserId;
+  }, [activeUserId]);
+
+  useEffect(() => {
+    reminderSettingsRef.current = reminderSettings;
+  }, [reminderSettings]);
+
+  useEffect(() => {
+    tasksRef.current = tasks;
+  }, [tasks]);
+
+  useEffect(() => {
+    submissionsRef.current = submissions;
+  }, [submissions]);
 
   const showToast = useCallback((text: string) => {
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     setToast({ id: Date.now(), text });
     toastTimerRef.current = window.setTimeout(() => {
       setToast(null);
-    }, 3600);
+    }, 4200);
   }, []);
 
   const syncFromSupabase = useCallback(async (silent = true): Promise<boolean> => {
@@ -126,6 +156,21 @@ export function useChallengeApp() {
         setAppConfig(remoteConfig);
         localStore.saveAppConfig(remoteConfig);
       }
+
+      const approvalNotice = detectNewApprovedPoints(
+        activeUserIdRef.current,
+        remoteUsers,
+        remoteSubs
+      );
+      if (approvalNotice && reminderSettingsRef.current.pointsApprovalEnabled) {
+        showToast(approvalNotice.toastText);
+        void showLocalOrSwNotification(
+          approvalNotice.title,
+          approvalNotice.body,
+          approvalNotice.tag
+        );
+      }
+
       setLastSyncError(null);
       return true;
     } catch (err) {
@@ -138,7 +183,7 @@ export function useChallengeApp() {
     }
   }, [showToast]);
 
-  // Initial load + 20s polling when Supabase is configured
+  // Initial load + 15s polling + immediate sync when returning to the app
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -153,12 +198,56 @@ export function useChallengeApp() {
     if (!supabaseClient.isConfigured) return () => { mounted = false; };
     const interval = window.setInterval(() => {
       void syncFromSupabase(true);
-    }, 20000);
+    }, 15000);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void syncFromSupabase(true);
+      }
+    };
+    const handleFocus = () => {
+      void syncFromSupabase(true);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleFocus);
+
     return () => {
       mounted = false;
       window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleFocus);
     };
   }, [syncFromSupabase]);
+
+  // Scheduled user-time reminders engine (daily Bible chapter + daily achievements + prayers)
+  useEffect(() => {
+    if (isLoading || !activeUserId) return;
+
+    const runCheck = () => {
+      void checkAndFireScheduledReminders(
+        reminderSettingsRef.current,
+        activeUserIdRef.current,
+        tasksRef.current,
+        submissionsRef.current,
+        (fired) => {
+          showToast(`${fired.title} — ${fired.body}`);
+        }
+      );
+    };
+
+    runCheck();
+    const timer = window.setInterval(runCheck, 30000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') runCheck();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [isLoading, activeUserId, showToast]);
 
   const refreshNow = useCallback(async () => {
     setIsSyncing(true);
@@ -246,6 +335,7 @@ export function useChallengeApp() {
         setIsSyncing(false);
         if (matched) {
           localStore.setActiveUserId(existing.id);
+          activeUserIdRef.current = existing.id;
           setActiveUserId(existing.id);
           showToast(`مرحباً بعودتك يا ${existing.fullName}!`);
           if (supabaseClient.isConfigured) void syncFromSupabase(true);
@@ -275,7 +365,12 @@ export function useChallengeApp() {
         setUsers(nextUsers);
         localStore.saveUsers(nextUsers);
         localStore.setActiveUserId(newUser.id);
+        activeUserIdRef.current = newUser.id;
         setActiveUserId(newUser.id);
+        localStore.saveApprovalSnapshot(newUser.id, {
+          seenApprovedIds: [],
+          lastBonusPoints: 0,
+        });
         setIsSyncing(false);
         showToast(`تم تسجيلك بنجاح يا ${cleanName}! أهلاً بك في تحدي طريق المزود`);
       }
@@ -730,7 +825,7 @@ export function useChallengeApp() {
       return;
     }
     try {
-      const msg = CsvExporter.downloadLeaderboardCsv(leaderboard);
+      const msg = ExcelExporter.downloadLeaderboardExcel(leaderboard);
       showToast(msg);
     } catch {
       showToast('تعذر تصدير ملف التقرير');
@@ -738,36 +833,72 @@ export function useChallengeApp() {
   }, [leaderboard, showToast]);
 
   const updateReminders = useCallback(
-    (settings: ReminderSettings) => {
-      setReminderSettings(settings);
-      localStore.saveReminderSettings(settings);
-      showToast('تم حفظ مواعيد التنبيهات اليومية');
+    (nextSettings: ReminderSettings) => {
+      const prev = reminderSettingsRef.current;
+      const todayIso = toIsoString(todayFastDate());
+      const now = new Date();
+      const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+      let normalized = { ...nextSettings };
+      if (normalized.bibleBookId !== prev.bibleBookId) {
+        normalized.bibleStartDateIso = todayIso;
+        localStore.clearFiredReminderToday(todayIso, 'bible_chapter');
+      } else if (!normalized.bibleStartDateIso) {
+        normalized.bibleStartDateIso = todayIso;
+      }
+
+      // If user moves a reminder to a future time today, allow it to fire at the newly chosen time
+      if (
+        normalized.bibleReadingHour !== prev.bibleReadingHour ||
+        normalized.bibleReadingMinute !== prev.bibleReadingMinute
+      ) {
+        const target = normalized.bibleReadingHour * 60 + normalized.bibleReadingMinute;
+        if (target > nowMinutes) {
+          localStore.clearFiredReminderToday(todayIso, 'bible_chapter');
+        }
+      }
+      if (
+        normalized.dailyTasksReminderHour !== prev.dailyTasksReminderHour ||
+        normalized.dailyTasksReminderMinute !== prev.dailyTasksReminderMinute
+      ) {
+        const target = normalized.dailyTasksReminderHour * 60 + normalized.dailyTasksReminderMinute;
+        if (target > nowMinutes) {
+          localStore.clearFiredReminderToday(todayIso, 'daily_tasks');
+        }
+      }
+
+      setReminderSettings(normalized);
+      reminderSettingsRef.current = normalized;
+      localStore.saveReminderSettings(normalized);
+      showToast('تم حفظ مواعيد الإشعارات وورد الكتاب المقدس ✅');
     },
     [showToast]
   );
+
+  const sendTestBibleReminder = useCallback(async () => {
+    const reading = getTodayBibleReading(
+      reminderSettingsRef.current.bibleBookId,
+      reminderSettingsRef.current.bibleStartDateIso
+    );
+    const { title, body } = formatBibleReminderNotification(reading);
+    await requestBrowserNotificationPermission();
+    const sent = await showLocalOrSwNotification(title, body, 'tariq-test-bible');
+    if (sent) {
+      showToast(`تم إرسال إشعار ورد اليوم (${reading.bookNameAr} - إصحاح ${reading.chapterNumber})`);
+      return;
+    }
+    showToast(`${title}: ${body}`);
+  }, [showToast]);
 
   const sendTestEncouragement = useCallback(async () => {
     const title = 'تحدي طريق المزود ✨';
     const body = `${appConfig.dailyVerseText} (${appConfig.dailyVerseRef}) — ${appConfig.dailyEncouragement}`;
 
-    if (typeof window !== 'undefined' && 'Notification' in window) {
-      if (Notification.permission === 'default') {
-        await Notification.requestPermission().catch(() => 'denied');
-      }
-      if (Notification.permission === 'granted') {
-        try {
-          new Notification(title, {
-            body,
-            icon: '/icon-192.png',
-            dir: 'rtl',
-            lang: 'ar',
-          });
-          showToast('تم إرسال إشعار تشجيعي الآن!');
-          return;
-        } catch {
-          // Some mobile browsers require SW notification; fallback to toast below
-        }
-      }
+    await requestBrowserNotificationPermission();
+    const sent = await showLocalOrSwNotification(title, body, 'tariq-test-encouragement');
+    if (sent) {
+      showToast('تم إرسال إشعار تشجيعي الآن!');
+      return;
     }
     showToast(`${title} ${appConfig.dailyVerseText}`);
   }, [appConfig, showToast]);
@@ -827,6 +958,7 @@ export function useChallengeApp() {
     changeAdminPin,
     exportLeaderboardCsv,
     updateReminders,
+    sendTestBibleReminder,
     sendTestEncouragement,
     testSupabaseConnection,
   };

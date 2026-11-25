@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tariq-almazwad-pwa-v5';
+const CACHE_NAME = 'tariq-almazwad-pwa-v8';
 
 const PRECACHE_ASSETS = [
   '/',
@@ -77,4 +77,48 @@ self.addEventListener('fetch', (event) => {
       })
     );
   }
+});
+
+// Handle Web Push payloads when delivered by a Push Service
+self.addEventListener('push', (event) => {
+  let title = 'تحدي طريق المزود ✨';
+  let body = 'تم اعتماد نقاط جديدة في رصيدك!';
+  try {
+    if (event.data) {
+      const payload = event.data.json();
+      if (payload.title) title = String(payload.title);
+      if (payload.body) body = String(payload.body);
+    }
+  } catch {
+    const text = event.data ? event.data.text() : '';
+    if (text) body = text;
+  }
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      dir: 'rtl',
+      lang: 'ar',
+      tag: 'tariq-almazwad-push',
+    })
+  );
+});
+
+// Focus or open the app when the user taps a notification
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      for (const client of clients) {
+        if ('focus' in client) {
+          return client.focus();
+        }
+      }
+      if (self.clients.openWindow) {
+        return self.clients.openWindow('/');
+      }
+      return undefined;
+    })
+  );
 });

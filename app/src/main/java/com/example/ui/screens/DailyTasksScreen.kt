@@ -30,9 +30,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.HourglassTop
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Quiz
 import androidx.compose.material3.Button
@@ -70,6 +72,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.R
+import com.example.data.BibleReadingPlan
 import com.example.data.ChallengeTask
 import com.example.data.FastCalendar
 import com.example.data.FastDate
@@ -80,6 +83,7 @@ import com.example.data.UrlValidator
 import com.example.ui.components.DailyVerseBanner
 import com.example.ui.components.StatusBadge
 import com.example.ui.components.TaskSubmissionBottomSheet
+import com.example.ui.components.formatTimeArabic
 import com.example.ui.components.openSafeExternalUrl
 import com.example.ui.components.sharePlainText
 import com.example.ui.components.taskIconForKey
@@ -104,6 +108,7 @@ fun DailyTasksScreen(
     uiState: AppUiState,
     onSubmitTask: (ChallengeTask, String) -> Unit,
     onOpenMyRank: () -> Unit,
+    onOpenReminders: () -> Unit,
     onLogout: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -121,14 +126,32 @@ fun DailyTasksScreen(
 
     var selectedFilterIdx by remember { mutableIntStateOf(0) }
     var selectedTaskForSheet by remember { mutableStateOf<ChallengeTask?>(null) }
+    var sheetInitialNote by remember { mutableStateOf("") }
+
+    val todayBibleReading = remember(
+        uiState.reminderSettings.bibleBookId,
+        uiState.reminderSettings.bibleStartDateIso,
+        today
+    ) {
+        BibleReadingPlan.getTodayReading(
+            startBookId = uiState.reminderSettings.bibleBookId,
+            startDateIso = uiState.reminderSettings.bibleStartDateIso,
+            today = today
+        )
+    }
 
     selectedTaskForSheet?.let { task ->
         TaskSubmissionBottomSheet(
             task = task,
-            onDismiss = { selectedTaskForSheet = null },
+            initialNote = sheetInitialNote,
+            onDismiss = {
+                selectedTaskForSheet = null
+                sheetInitialNote = ""
+            },
             onConfirmSubmit = { note ->
                 onSubmitTask(task, note)
                 selectedTaskForSheet = null
+                sheetInitialNote = ""
             }
         )
     }
@@ -496,6 +519,118 @@ fun DailyTasksScreen(
                     encouragement = uiState.appConfig.dailyEncouragement,
                     onShare = { text -> sharePlainText(context, text, "مشاركة آية اليوم") }
                 )
+            }
+
+            // Daily Bible Reading Chapter & Custom Reminder Card
+            item {
+                val bibleTask = activeTasks.firstOrNull { it.id == "task_bible_reading" }
+                val bibleTaskSub = bibleTask?.let { bt ->
+                    val pk = FastCalendar.periodKeyForTask(TaskFrequency.fromKey(bt.frequency), today)
+                    uiState.userSubmissions.firstOrNull { it.taskId == bt.id && it.periodKey == pk }
+                }
+                val isBibleLocked = isAfterEnd ||
+                    bibleTaskSub?.status == SubmissionStatus.PENDING.key ||
+                    bibleTaskSub?.status == SubmissionStatus.APPROVED.key
+
+                Card(
+                    shape = RoundedCornerShape(22.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MidnightTeal.copy(alpha = 0.22f)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(MidnightTeal),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.MenuBook,
+                                    contentDescription = "ورد الكتاب المقدس اليوم",
+                                    tint = BrightGold,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "ورد الكتاب المقدس اليوم 📖",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = WarmGold,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "${todayBibleReading.bookNameAr} — الإصحاح ${todayBibleReading.chapterNumber}",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.AccessTime,
+                                        contentDescription = null,
+                                        tint = MidnightTeal,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Text(
+                                        text = "القراءة: ${formatTimeArabic(uiState.reminderSettings.bibleReadingHour, uiState.reminderSettings.bibleReadingMinute)} • الإنجازات: ${formatTimeArabic(uiState.reminderSettings.dailyTasksReminderHour, uiState.reminderSettings.dailyTasksReminderMinute)}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (bibleTask != null && !isBibleLocked) {
+                                Button(
+                                    onClick = {
+                                        sheetInitialNote = "تمت قراءة ${todayBibleReading.bookNameAr} — الإصحاح ${todayBibleReading.chapterNumber}"
+                                        selectedTaskForSheet = bibleTask
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MidnightTeal),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("log_today_bible_chapter_button")
+                                ) {
+                                    Text(
+                                        text = "سجّل الإصحاح (+${bibleTask.points})",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = Color.White
+                                    )
+                                }
+                            }
+                            OutlinedButton(
+                                onClick = onOpenReminders,
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, MidnightTeal.copy(alpha = 0.35f)),
+                                modifier = Modifier.testTag("change_bible_plan_button")
+                            ) {
+                                Text(
+                                    text = "تغيير السفر والوقت ⏰",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MidnightTeal
+                                )
+                            }
+                        }
+                    }
+                }
             }
 
             // Interactive Category Filter Chips

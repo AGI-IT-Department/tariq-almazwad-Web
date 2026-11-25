@@ -19,29 +19,50 @@ import java.util.Calendar
 
 object ReminderScheduler {
     const val CHANNEL_ID = "nativity_fast_reminders_channel"
+    const val CHANNEL_POINTS_APPROVAL = "nativity_points_approval_channel"
 
     const val EXTRA_TITLE = "extra_reminder_title"
     const val EXTRA_MESSAGE = "extra_reminder_message"
     const val EXTRA_NOTIFICATION_ID = "extra_notification_id"
+    const val EXTRA_REMINDER_TYPE = "extra_reminder_type"
+
+    const val TYPE_STATIC = "static"
+    const val TYPE_DAILY_TASKS = "daily_tasks"
+    const val TYPE_BIBLE_CHAPTER = "bible_chapter"
 
     const val ID_MORNING_PRAYER = 1001
     const val ID_NIGHT_PRAYER = 1002
     const val ID_WEEKLY_LITURGY = 1003
     const val ID_YOUTH_MEETING = 1004
     const val ID_DAILY_ENCOURAGEMENT = 1005
+    const val ID_DAILY_TASKS_ACHIEVEMENTS = 1006
+    const val ID_BIBLE_CHAPTER_DAILY = 1007
+    const val ID_INSTANT_BIBLE_TEST = 1098
     const val ID_INSTANT_TEST = 1099
+    const val ID_POINTS_APPROVED_BASE = 2000
 
     fun ensureNotificationChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+            val remindersChannel = NotificationChannel(
                 CHANNEL_ID,
                 context.getString(R.string.notification_channel_name),
                 NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
                 description = context.getString(R.string.notification_channel_desc)
             }
-            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            manager.createNotificationChannel(channel)
+            manager.createNotificationChannel(remindersChannel)
+
+            val approvalChannel = NotificationChannel(
+                CHANNEL_POINTS_APPROVAL,
+                context.getString(R.string.points_approval_channel_name),
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = context.getString(R.string.points_approval_channel_desc)
+                enableVibration(true)
+            }
+            manager.createNotificationChannel(approvalChannel)
         }
     }
 
@@ -125,6 +146,34 @@ object ReminderScheduler {
         } else {
             cancelReminder(context, ID_DAILY_ENCOURAGEMENT)
         }
+
+        if (settings.dailyTasksReminderEnabled) {
+            scheduleDailyReminder(
+                context = context,
+                requestCode = ID_DAILY_TASKS_ACHIEVEMENTS,
+                hour = settings.dailyTasksReminderHour,
+                minute = settings.dailyTasksReminderMinute,
+                title = "تذكير بإنجازاتك اليومية ✨",
+                message = "افتح التطبيق وسجّل إنجازاتك ومهامك اليومية في تحدي طريق المزود!",
+                reminderType = TYPE_DAILY_TASKS
+            )
+        } else {
+            cancelReminder(context, ID_DAILY_TASKS_ACHIEVEMENTS)
+        }
+
+        if (settings.bibleReadingReminderEnabled) {
+            scheduleDailyReminder(
+                context = context,
+                requestCode = ID_BIBLE_CHAPTER_DAILY,
+                hour = settings.bibleReadingHour,
+                minute = settings.bibleReadingMinute,
+                title = "ورد الكتاب المقدس اليوم 📖",
+                message = "حان وقت قراءة إصحاح اليوم في تحدي طريق المزود!",
+                reminderType = TYPE_BIBLE_CHAPTER
+            )
+        } else {
+            cancelReminder(context, ID_BIBLE_CHAPTER_DAILY)
+        }
     }
 
     private fun scheduleDailyReminder(
@@ -133,7 +182,8 @@ object ReminderScheduler {
         hour: Int,
         minute: Int,
         title: String,
-        message: String
+        message: String,
+        reminderType: String = TYPE_STATIC
     ) {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val triggerCal = Calendar.getInstance().apply {
@@ -145,7 +195,7 @@ object ReminderScheduler {
                 add(Calendar.DAY_OF_YEAR, 1)
             }
         }
-        val pendingIntent = buildPendingIntent(context, requestCode, title, message)
+        val pendingIntent = buildPendingIntent(context, requestCode, title, message, reminderType)
         alarmManager.setInexactRepeating(
             AlarmManager.RTC_WAKEUP,
             triggerCal.timeInMillis,
@@ -199,12 +249,14 @@ object ReminderScheduler {
         context: Context,
         requestCode: Int,
         title: String,
-        message: String
+        message: String,
+        reminderType: String = TYPE_STATIC
     ): PendingIntent {
         val intent = Intent(context, ReminderReceiver::class.java).apply {
             putExtra(EXTRA_TITLE, title)
             putExtra(EXTRA_MESSAGE, message)
             putExtra(EXTRA_NOTIFICATION_ID, requestCode)
+            putExtra(EXTRA_REMINDER_TYPE, reminderType)
         }
         return PendingIntent.getBroadcast(
             context,
@@ -239,6 +291,44 @@ object ReminderScheduler {
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setContentIntent(contentPendingIntent)
+            .setAutoCancel(true)
+            .build()
+
+        return try {
+            NotificationManagerCompat.from(context).notify(notificationId, notification)
+            true
+        } catch (_: SecurityException) {
+            false
+        }
+    }
+
+    fun showPointsApprovedNotification(
+        context: Context,
+        title: String,
+        message: String,
+        notificationId: Int = ID_POINTS_APPROVED_BASE + (System.currentTimeMillis() % 1000).toInt()
+    ): Boolean {
+        ensureNotificationChannel(context)
+        if (!hasNotificationPermission(context)) return false
+
+        val openAppIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val contentPendingIntent = PendingIntent.getActivity(
+            context,
+            notificationId,
+            openAppIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_POINTS_APPROVAL)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
             .setContentIntent(contentPendingIntent)
             .setAutoCancel(true)
             .build()
