@@ -378,17 +378,42 @@ class ChallengeRepository(
         return Result.success("تم تحديث المسابقة الأسبوعية وآية اليوم بنجاح")
     }
 
-    suspend fun verifyAdminPin(pin: String): Boolean = preferences.verifyAdminPin(pin)
+    suspend fun verifyAdminPin(pin: String): Result<Boolean> {
+        val cleanPin = pin.trim()
+        if (cleanPin.isEmpty()) return Result.success(false)
+        if (supabase.isConfigured) {
+            return supabase.verifyAdminPin(cleanPin)
+        }
+        return Result.success(preferences.verifyAdminPin(cleanPin))
+    }
 
     suspend fun updateAdminPin(currentPin: String, newPin: String): Result<String> {
-        if (newPin.trim().length < 4) {
-            return Result.failure(IllegalArgumentException("الرمز السري يجب أن يكون 4 أرقام على الأقل"))
+        val cleanCurrent = currentPin.trim()
+        val cleanNew = newPin.trim()
+        if (cleanNew.length < 4) {
+            return Result.failure(IllegalArgumentException("كلمة المرور الجديدة يجب أن تكون 4 أحرف أو أرقام على الأقل"))
         }
-        if (!preferences.verifyAdminPin(currentPin)) {
-            return Result.failure(IllegalArgumentException("الرمز السري الحالي غير صحيح"))
+        if (supabase.isConfigured) {
+            val updated = supabase.updateAdminPin(cleanCurrent, cleanNew).getOrElse {
+                val msg = it.message.orEmpty()
+                return Result.failure(
+                    IllegalStateException(
+                        if (msg.contains("404")) "يرجى تشغيل كود SQL لتفعيل حفظ كلمة مرور الأدمن في Supabase أولاً"
+                        else "تعذر تحديث كلمة المرور في قاعدة البيانات"
+                    )
+                )
+            }
+            if (!updated) {
+                return Result.failure(IllegalArgumentException("كلمة المرور الحالية غير صحيحة"))
+            }
+            preferences.updateAdminPin(cleanNew)
+            return Result.success("تم تحديث كلمة مرور الأدمن في قاعدة البيانات بنجاح ✅")
         }
-        preferences.updateAdminPin(newPin.trim())
-        return Result.success("تم تغيير رمز دخول الأدمن بنجاح")
+        if (!preferences.verifyAdminPin(cleanCurrent)) {
+            return Result.failure(IllegalArgumentException("كلمة المرور الحالية غير صحيحة"))
+        }
+        preferences.updateAdminPin(cleanNew)
+        return Result.success("تم تغيير كلمة مرور الأدمن بنجاح")
     }
 
     suspend fun saveReminderSettings(settings: ReminderSettings) {

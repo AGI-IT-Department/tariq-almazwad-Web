@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tariq-almazwad-pwa-v3';
+const CACHE_NAME = 'tariq-almazwad-pwa-v5';
 
 const PRECACHE_ASSETS = [
   '/',

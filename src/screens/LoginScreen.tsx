@@ -40,7 +40,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl px-2.5 text-sm font-bold text-burgundy transition hover:bg-burgundy/10"
           >
             <ShieldCheck className="h-4 w-4" />
-            <span>دخول الخادم / الأدمن</span>
+            <span>دخول خدام التحدي</span>
           </button>
         </div>
 
@@ -156,7 +156,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         </form>
 
         <p className="px-2 pb-4 text-center text-xs leading-relaxed text-ink-muted">
-          إذا نسيت رقمك السري، تواصل مع خادم الاجتماع (مينا) لإعادة تعيينه من لوحة التحكم.
+          إذا نسيت رقمك السري، تواصل مع خدام التحدي لإعادة تعيينه من لوحة التحكم.
         </p>
       </div>
     </div>

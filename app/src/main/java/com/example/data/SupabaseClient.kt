@@ -341,4 +341,47 @@ class SupabaseClient {
             }
         }
     }
+
+    private fun buildRpcUrl(fnName: String): String {
+        val url = "$baseUrl/rest/v1/rpc/$fnName".toHttpUrlOrNull()
+            ?: throw IllegalStateException("رابط Supabase غير صالح")
+        return url.toString()
+    }
+
+    suspend fun verifyAdminPin(pin: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        runCatching {
+            val payload = JSONObject().apply {
+                put("input_pin", pin.trim())
+            }
+            val req = Request.Builder()
+                .url(buildRpcUrl("verify_admin_pin"))
+                .withSupabaseHeaders()
+                .post(payload.toString().toRequestBody(jsonMediaType))
+                .build()
+            client.newCall(req).execute().use { resp ->
+                val bodyStr = resp.body?.string()
+                if (!resp.isSuccessful) error(formatHttpError("verify_admin_pin", resp.code, bodyStr))
+                bodyStr?.trim() == "true"
+            }
+        }
+    }
+
+    suspend fun updateAdminPin(currentPin: String, newPin: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        runCatching {
+            val payload = JSONObject().apply {
+                put("current_pin", currentPin.trim())
+                put("new_pin", newPin.trim())
+            }
+            val req = Request.Builder()
+                .url(buildRpcUrl("update_admin_pin"))
+                .withSupabaseHeaders()
+                .post(payload.toString().toRequestBody(jsonMediaType))
+                .build()
+            client.newCall(req).execute().use { resp ->
+                val bodyStr = resp.body?.string()
+                if (!resp.isSuccessful) error(formatHttpError("update_admin_pin", resp.code, bodyStr))
+                bodyStr?.trim() == "true"
+            }
+        }
+    }
 }

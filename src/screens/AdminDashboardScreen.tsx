@@ -4,8 +4,6 @@ import {
   Award,
   CheckCheck,
   CheckCircle2,
-  Copy,
-  Database,
   Download,
   Edit3,
   Gift,
@@ -28,20 +26,16 @@ import {
 } from '../types';
 import { FastCalendar, formatTimestampArabic } from '../lib/fastCalendar';
 import { openWhatsAppChat } from '../lib/securityAndExport';
-import { SUPABASE_SQL_SCRIPT } from '../lib/supabaseSqlSchema';
 
 interface AdminDashboardScreenProps {
   isUnlocked: boolean;
-  isSupabaseLive: boolean;
-  supabaseHost: string;
-  lastSyncError: string | null;
   pendingSubmissions: TaskSubmission[];
   leaderboard: LeaderboardEntry[];
   allUsersCount: number;
   approvedSubmissionsCount: number;
   allTasks: ChallengeTask[];
   appConfig: AppConfig;
-  onUnlock: (pin: string) => Promise<boolean>;
+  onUnlock: (pin: string) => Promise<{ ok: boolean; error?: string }>;
   onClose: () => void;
   onLock: () => void;
   onReviewSubmission: (id: string, approve: boolean, note?: string) => void;
@@ -53,16 +47,12 @@ interface AdminDashboardScreenProps {
   onUpdateTask: (task: ChallengeTask) => void;
   onUpdateConfig: (config: AppConfig) => void;
   onExportCsv: () => void;
-  onChangeAdminPin: (currentPin: string, newPin: string) => void;
-  onTestSupabase: () => Promise<{ ok: boolean; message: string }>;
+  onChangeAdminPin: (currentPin: string, newPin: string) => Promise<boolean>;
   onFeedback: (msg: string) => void;
 }
 
 export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
   isUnlocked,
-  isSupabaseLive,
-  supabaseHost,
-  lastSyncError,
   pendingSubmissions,
   leaderboard,
   allUsersCount,
@@ -82,7 +72,6 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
   onUpdateConfig,
   onExportCsv,
   onChangeAdminPin,
-  onTestSupabase,
   onFeedback,
 }) => {
   const [selectedTab, setSelectedTab] = useState(0);
@@ -94,7 +83,6 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
   const [rejectingSub, setRejectingSub] = useState<TaskSubmission | null>(null);
   const [bonusTarget, setBonusTarget] = useState<LeaderboardEntry | null>(null);
   const [editingTask, setEditingTask] = useState<ChallengeTask | null>(null);
-  const [showSqlModal, setShowSqlModal] = useState(false);
 
   if (!isUnlocked) {
     return <AdminPinGate onUnlock={onUnlock} onBack={onClose} />;
@@ -104,7 +92,7 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
     `طلبات الاعتماد (${pendingSubmissions.length})`,
     `لوحة الأبطال والشباب (${allUsersCount})`,
     'المهام والمسابقة',
-    'التصدير و Supabase',
+    'التصدير والإعدادات',
   ];
 
   return (
@@ -122,7 +110,7 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
               <ArrowRight className="h-5 w-5" />
             </button>
             <div>
-              <h1 className="text-base font-bold text-gold-bright">لوحة تحكم الخادم - مينا</h1>
+              <h1 className="text-base font-bold text-gold-bright">لوحة تحكم خدام التحدي</h1>
               <p className="text-[11px] text-white/85">
                 لوحة الأبطال الحصرية وإدارة الشباب والموافقات
               </p>
@@ -195,14 +183,9 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
         )}
         {selectedTab === 3 && (
           <ExportAndSetupTab
-            isSupabaseLive={isSupabaseLive}
-            supabaseHost={supabaseHost}
-            lastSyncError={lastSyncError}
             usersCount={allUsersCount}
             approvedCount={approvedSubmissionsCount}
             onExportCsv={onExportCsv}
-            onShowSql={() => setShowSqlModal(true)}
-            onTestSupabase={onTestSupabase}
             onChangeAdminPin={onChangeAdminPin}
           />
         )}
@@ -285,59 +268,27 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
           }}
         />
       )}
-      {showSqlModal && (
-        <ModalFrame title="كود SQL لإنشاء جداول Supabase" onClose={() => setShowSqlModal(false)}>
-          <p className="mb-2 text-xs text-ink-muted">
-            انسخ الكود التالي والصقه في Supabase SQL Editor ثم اضغط Run:
-          </p>
-          <pre
-            dir="ltr"
-            className="max-h-64 overflow-auto rounded-xl bg-midnight-dark p-3 text-left font-mono text-[11px] leading-relaxed text-gold-bright"
-          >
-            {SUPABASE_SQL_SCRIPT}
-          </pre>
-          <div className="mt-4 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setShowSqlModal(false)}
-              className="rounded-xl px-4 py-2 text-sm font-semibold text-ink-muted hover:bg-parchment-variant"
-            >
-              إغلاق
-            </button>
-            <button
-              type="button"
-              onClick={async () => {
-                try {
-                  await navigator.clipboard.writeText(SUPABASE_SQL_SCRIPT);
-                  onFeedback('تم نسخ كود SQL بالكامل!');
-                } catch {
-                  onFeedback('تعذر النسخ التلقائي');
-                }
-              }}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-midnight px-4 py-2 text-sm font-bold text-white"
-            >
-              <Copy className="h-4 w-4" />
-              <span>نسخ كود SQL</span>
-            </button>
-          </div>
-        </ModalFrame>
-      )}
     </div>
   );
 };
 
 /* ---------------- Admin PIN Gate ---------------- */
 const AdminPinGate: React.FC<{
-  onUnlock: (pin: string) => Promise<boolean>;
+  onUnlock: (pin: string) => Promise<{ ok: boolean; error?: string }>;
   onBack: () => void;
 }> = ({ onUnlock, onBack }) => {
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const ok = await onUnlock(pin);
-    if (!ok) setError('الرمز السري غير صحيح');
+    if (checking) return;
+    setChecking(true);
+    setError(null);
+    const res = await onUnlock(pin);
+    setChecking(false);
+    if (!res.ok) setError(res.error || 'كلمة مرور الأدمن غير صحيحة');
   };
 
   return (
@@ -347,35 +298,36 @@ const AdminPinGate: React.FC<{
         className="w-full max-w-[440px] space-y-4 rounded-[24px] border border-gold-warm/60 bg-white p-6 text-center shadow-md"
       >
         <ShieldCheck className="mx-auto h-12 w-12 text-burgundy" />
-        <h1 className="text-xl font-bold text-midnight">دخول الخادم / الأدمن (مينا)</h1>
+        <h1 className="text-xl font-bold text-midnight">دخول خدام التحدي</h1>
         <p className="text-xs text-ink-muted">
-          أدخل رمز الدخول السري للوحة التحكم (الرمز الافتراضي: 2026)
+          هذه اللوحة خاصة بخدام التحدي فقط — أدخل كلمة مرور الأدمن للدخول
         </p>
 
         <div className="text-right">
           <input
             type="password"
-            inputMode="numeric"
+            autoComplete="current-password"
             value={pin}
             onChange={(e) => {
               setPin(e.target.value);
               setError(null);
             }}
-            placeholder="الرمز السري للأدمن"
+            placeholder="كلمة مرور الأدمن"
             className={`h-12 w-full rounded-xl border px-3.5 text-center text-base tracking-widest outline-none ${
               error
                 ? 'border-status-rejected focus:ring-2 focus:ring-status-rejected/20'
                 : 'border-parchment-outline focus:border-midnight focus:ring-2 focus:ring-midnight/15'
             }`}
           />
-          {error && <p className="mt-1 text-xs font-semibold text-status-rejected">{error}</p>}
+          {error && <p className="mt-1.5 text-xs font-semibold text-status-rejected">{error}</p>}
         </div>
 
         <button
           type="submit"
-          className="h-12 w-full rounded-2xl bg-midnight text-sm font-bold text-white shadow hover:bg-midnight-dark"
+          disabled={checking}
+          className="h-12 w-full rounded-2xl bg-midnight text-sm font-bold text-white shadow hover:bg-midnight-dark disabled:opacity-60"
         >
-          دخول لوحة التحكم
+          {checking ? 'جاري التحقق...' : 'دخول لوحة التحكم'}
         </button>
         <button
           type="button"
@@ -743,38 +695,31 @@ const TasksAndQuizTab: React.FC<{
   );
 };
 
-/* ---------------- Tab 3: Export & Supabase Setup ---------------- */
+/* ---------------- Tab 3: Export & Settings ---------------- */
 const ExportAndSetupTab: React.FC<{
-  isSupabaseLive: boolean;
-  supabaseHost: string;
-  lastSyncError: string | null;
   usersCount: number;
   approvedCount: number;
   onExportCsv: () => void;
-  onShowSql: () => void;
-  onTestSupabase: () => Promise<{ ok: boolean; message: string }>;
-  onChangeAdminPin: (currentPin: string, newPin: string) => void;
+  onChangeAdminPin: (currentPin: string, newPin: string) => Promise<boolean>;
 }> = ({
-  isSupabaseLive,
-  supabaseHost,
-  lastSyncError,
   usersCount,
   approvedCount,
   onExportCsv,
-  onShowSql,
-  onTestSupabase,
   onChangeAdminPin,
 }) => {
   const [currentPin, setCurrentPin] = useState('');
   const [newPin, setNewPin] = useState('');
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [savingPin, setSavingPin] = useState(false);
 
-  const handleTest = async () => {
-    setTesting(true);
-    const res = await onTestSupabase();
-    setTestResult(res);
-    setTesting(false);
+  const handleUpdatePin = async () => {
+    if (savingPin) return;
+    setSavingPin(true);
+    const ok = await onChangeAdminPin(currentPin, newPin);
+    setSavingPin(false);
+    if (ok) {
+      setCurrentPin('');
+      setNewPin('');
+    }
   };
 
   return (
@@ -799,69 +744,29 @@ const ExportAndSetupTab: React.FC<{
       </div>
 
       <div className="space-y-3 rounded-[20px] border border-parchment-border bg-white p-4 shadow-xs">
-        <div className="flex items-center gap-2 text-midnight">
-          <Database className="h-5 w-5" />
-          <h3 className="text-base font-bold">ربط قاعدة بيانات Supabase الحية</h3>
-        </div>
-        <p className="text-xs leading-relaxed text-ink-muted">
-          {isSupabaseLive
-            ? `التطبيق مهيأ للاتصال بـ Supabase (${supabaseHost}) ومزامنة المشاركات والنقاط حياً.`
-            : 'أضف VITE_SUPABASE_URL و VITE_SUPABASE_ANON_KEY في إعدادات Vercel / Render ثم اضغط Redeploy لتفعيل المزامنة الحية.'}
+        <h3 className="text-base font-bold text-midnight">تغيير كلمة مرور الأدمن</h3>
+        <p className="text-xs text-ink-muted">
+          يتم تحديث كلمة المرور مباشرة في قاعدة البيانات وتُطبّق فوراً على جميع الأجهزة.
         </p>
-        {(testResult || lastSyncError) && (
-          <div
-            className={`rounded-xl px-3 py-2.5 text-xs font-semibold leading-relaxed ${
-              testResult?.ok
-                ? 'bg-status-approvedBg text-status-approved'
-                : 'bg-status-rejectedBg text-status-rejected'
-            }`}
-          >
-            {testResult ? testResult.message : `آخر خطأ مزامنة: ${lastSyncError}`}
-          </div>
-        )}
-        <button
-          type="button"
-          disabled={testing}
-          onClick={handleTest}
-          className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-midnight text-sm font-bold text-white shadow transition hover:bg-midnight-dark disabled:opacity-60"
-        >
-          <Database className="h-4 w-4" />
-          <span>{testing ? 'جاري فحص الاتصال...' : 'اختبار الاتصال بقاعدة البيانات الآن'}</span>
-        </button>
-        <button
-          type="button"
-          onClick={onShowSql}
-          className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-midnight/30 text-sm font-bold text-midnight transition hover:bg-parchment-variant"
-        >
-          <Copy className="h-4 w-4" />
-          <span>عرض ونسخ كود SQL لـ Supabase</span>
-        </button>
-      </div>
-
-      <div className="space-y-3 rounded-[20px] border border-parchment-border bg-white p-4 shadow-xs">
-        <h3 className="text-base font-bold text-midnight">تغيير رمز دخول الأدمن (PIN)</h3>
         <Field
-          label="الرمز الحالي"
+          label="كلمة المرور الحالية"
           type="password"
           value={currentPin}
           onChange={setCurrentPin}
         />
         <Field
-          label="الرمز الجديد (4 أرقام فأكثر)"
+          label="كلمة المرور الجديدة (4 أحرف أو أرقام فأكثر)"
           type="password"
           value={newPin}
           onChange={setNewPin}
         />
         <button
           type="button"
-          onClick={() => {
-            onChangeAdminPin(currentPin, newPin);
-            setCurrentPin('');
-            setNewPin('');
-          }}
-          className="h-12 w-full rounded-xl bg-midnight text-sm font-bold text-white shadow hover:bg-midnight-dark"
+          disabled={savingPin}
+          onClick={handleUpdatePin}
+          className="h-12 w-full rounded-xl bg-midnight text-sm font-bold text-white shadow hover:bg-midnight-dark disabled:opacity-60"
         >
-          تحديث رمز الأدمن
+          {savingPin ? 'جاري التحديث في قاعدة البيانات...' : 'تحديث كلمة مرور الأدمن'}
         </button>
       </div>
     </div>

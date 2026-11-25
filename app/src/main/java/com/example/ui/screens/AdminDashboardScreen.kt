@@ -1,12 +1,8 @@
 package com.example.ui.screens
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,7 +19,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -35,7 +30,6 @@ import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Download
@@ -43,7 +37,6 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -73,17 +66,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.data.AppConfigEntity
 import com.example.data.ChallengeTask
 import com.example.data.FastCalendar
 import com.example.data.LeaderboardEntry
-import com.example.data.SupabaseSqlSchema
 import com.example.data.TaskFrequency
 import com.example.data.TaskSubmission
 import com.example.ui.components.formatTimestampArabic
@@ -104,7 +94,7 @@ import com.example.ui.theme.WhatsAppGreen
 @Composable
 fun AdminDashboardScreen(
     uiState: AppUiState,
-    onUnlock: (String, () -> Unit) -> Unit,
+    onUnlock: (String, (String) -> Unit) -> Unit,
     onClose: () -> Unit,
     onLock: () -> Unit,
     onReviewSubmission: (String, Boolean, String) -> Unit,
@@ -131,13 +121,12 @@ fun AdminDashboardScreen(
         return
     }
 
-    val context = LocalContext.current
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = listOf(
         "طلبات الاعتماد (${uiState.pendingSubmissions.size})",
         "لوحة الأبطال والشباب (${uiState.allUsers.size})",
         "المهام والمسابقة",
-        "التصدير و Supabase"
+        "التصدير والإعدادات"
     )
 
     // Dialog states
@@ -147,7 +136,6 @@ fun AdminDashboardScreen(
     var deletingUserEntry by remember { mutableStateOf<LeaderboardEntry?>(null) }
     var showAddUserDialog by remember { mutableStateOf(false) }
     var editingTask by remember { mutableStateOf<ChallengeTask?>(null) }
-    var showSqlDialog by remember { mutableStateOf(false) }
 
     // 1) Add New Youth Dialog
     if (showAddUserDialog) {
@@ -421,56 +409,6 @@ fun AdminDashboardScreen(
         )
     }
 
-    // 7) Supabase SQL Schema Viewer Dialog
-    if (showSqlDialog) {
-        AlertDialog(
-            onDismissRequest = { showSqlDialog = false },
-            title = { Text("كود SQL لإنشاء جداول Supabase") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "انسخ الكود التالي والصقه في Supabase SQL Editor ثم اضغط Run:",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Surface(
-                        color = MidnightTealDark,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(260.dp)
-                    ) {
-                        Text(
-                            text = SupabaseSqlSchema.SQL_SCRIPT,
-                            color = BrightGold,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp,
-                            modifier = Modifier
-                                .padding(10.dp)
-                                .horizontalScroll(rememberScrollState())
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        cm.setPrimaryClip(ClipData.newPlainText("Supabase SQL", SupabaseSqlSchema.SQL_SCRIPT))
-                        onFeedback("تم نسخ كود SQL بالكامل!")
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MidnightTeal)
-                ) {
-                    Icon(Icons.Filled.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("نسخ كود SQL", color = Color.White)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showSqlDialog = false }) { Text("إغلاق") }
-            }
-        )
-    }
-
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -502,7 +440,7 @@ fun AdminDashboardScreen(
                     }
                     Column {
                         Text(
-                            text = "لوحة تحكم الخادم - مينا",
+                            text = "لوحة تحكم خدام التحدي",
                             style = MaterialTheme.typography.titleMedium,
                             color = BrightGold,
                             fontWeight = FontWeight.Bold
@@ -570,11 +508,9 @@ fun AdminDashboardScreen(
                     onSaveConfig = onUpdateConfig
                 )
                 3 -> AdminExportAndSetupTab(
-                    isSupabaseLive = uiState.isSupabaseLive,
                     usersCount = uiState.allUsers.size,
                     approvedCount = uiState.allSubmissions.count { it.status == "approved" },
                     onExportCsv = onExportCsv,
-                    onShowSql = { showSqlDialog = true },
                     onChangeAdminPin = onChangeAdminPin
                 )
             }
@@ -584,7 +520,7 @@ fun AdminDashboardScreen(
 
 @Composable
 private fun AdminPinGate(
-    onUnlock: (String, () -> Unit) -> Unit,
+    onUnlock: (String, (String) -> Unit) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -614,17 +550,17 @@ private fun AdminPinGate(
             ) {
                 Icon(
                     imageVector = Icons.Filled.AdminPanelSettings,
-                    contentDescription = "دخول الأدمن",
+                    contentDescription = "دخول خدام التحدي",
                     tint = NativityBurgundy,
                     modifier = Modifier.size(48.dp)
                 )
                 Text(
-                    text = "دخول الخادم / الأدمن (مينا)",
+                    text = "دخول خدام التحدي",
                     style = MaterialTheme.typography.headlineSmall,
                     color = MidnightTeal
                 )
                 Text(
-                    text = "أدخل رمز الدخول السري للوحة التحكم (الرمز الافتراضي: 2026)",
+                    text = "هذه اللوحة خاصة بخدام التحدي فقط — أدخل كلمة مرور الأدمن للدخول",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -634,9 +570,9 @@ private fun AdminPinGate(
                         pin = it
                         errorMsg = null
                     },
-                    label = { Text("الرمز السري للأدمن") },
+                    label = { Text("كلمة مرور الأدمن") },
                     visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     isError = errorMsg != null,
                     supportingText = errorMsg?.let { msg -> { Text(msg) } },
                     singleLine = true,
@@ -646,7 +582,7 @@ private fun AdminPinGate(
                 )
                 Button(
                     onClick = {
-                        onUnlock(pin) { errorMsg = "الرمز السري غير صحيح" }
+                        onUnlock(pin) { msg -> errorMsg = msg }
                     },
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = MidnightTeal),
@@ -1280,11 +1216,9 @@ private fun AdminTasksAndQuizTab(
 
 @Composable
 private fun AdminExportAndSetupTab(
-    isSupabaseLive: Boolean,
     usersCount: Int,
     approvedCount: Int,
     onExportCsv: () -> Unit,
-    onShowSql: () -> Unit,
     onChangeAdminPin: (String, String) -> Unit
 ) {
     var currentPin by remember { mutableStateOf("") }
@@ -1347,73 +1281,31 @@ private fun AdminExportAndSetupTab(
                     modifier = Modifier.padding(18.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(Icons.Filled.Storage, contentDescription = null, tint = MidnightTeal)
-                        Text(
-                            text = "ربط قاعدة بيانات Supabase الحية",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
                     Text(
-                        text = if (isSupabaseLive) {
-                            "التطبيق متصل الآن بـ Supabase ويتم مزامنة كل المشاركات والنقاط حياً بين جميع الشباب والخادم."
-                        } else {
-                            "أضف SUPABASE_URL و SUPABASE_ANON_KEY في لوحة Secrets في AI Studio لتفعيل المزامنة الحية."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    OutlinedButton(
-                        onClick = onShowSql,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .testTag("admin_show_supabase_sql_button")
-                    ) {
-                        Icon(Icons.Filled.ContentCopy, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("عرض ونسخ كود SQL لـ Supabase")
-                    }
-                }
-            }
-        }
-
-        item {
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Text(
-                        text = "تغيير رمز دخول الأدمن (PIN)",
+                        text = "تغيير كلمة مرور الأدمن",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "يتم تحديث كلمة المرور مباشرة في قاعدة البيانات وتُطبّق فوراً على جميع الأجهزة.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     OutlinedTextField(
                         value = currentPin,
                         onValueChange = { currentPin = it },
-                        label = { Text("الرمز الحالي") },
+                        label = { Text("كلمة المرور الحالية") },
                         visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
                     OutlinedTextField(
                         value = newPin,
                         onValueChange = { newPin = it },
-                        label = { Text("الرمز الجديد (4 أرقام فأكثر)") },
+                        label = { Text("كلمة المرور الجديدة (4 أحرف أو أرقام فأكثر)") },
                         visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -1427,7 +1319,7 @@ private fun AdminExportAndSetupTab(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("تحديث رمز الأدمن", color = Color.White)
+                        Text("تحديث كلمة مرور الأدمن", color = Color.White)
                     }
                 }
             }

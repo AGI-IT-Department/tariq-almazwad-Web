@@ -52,9 +52,6 @@ export const App: React.FC = () => {
       ) : app.isAdminOpen ? (
         <AdminDashboardScreen
           isUnlocked={app.isAdminUnlocked}
-          isSupabaseLive={app.isSupabaseLive}
-          supabaseHost={app.supabaseHost}
-          lastSyncError={app.lastSyncError}
           pendingSubmissions={app.pendingSubmissions}
           leaderboard={app.leaderboard}
           allUsersCount={app.allUsers.length}
@@ -76,7 +73,6 @@ export const App: React.FC = () => {
           onUpdateConfig={app.updateAppConfig}
           onExportCsv={app.exportLeaderboardCsv}
           onChangeAdminPin={app.changeAdminPin}
-          onTestSupabase={app.testSupabaseConnection}
           onFeedback={app.showToast}
         />
       ) : !app.hasSeenWelcome ? (
@@ -93,7 +89,7 @@ export const App: React.FC = () => {
           <AppHeader
             isSupabaseLive={app.isSupabaseLive}
             isSyncing={app.isSyncing}
-            pendingAdminCount={app.pendingSubmissions.length}
+            pendingAdminCount={app.isAdminUnlocked ? app.pendingSubmissions.length : 0}
             onOpenAdmin={app.openAdmin}
             onOpenReminders={() => setShowReminders(true)}
             onRefresh={app.refreshNow}

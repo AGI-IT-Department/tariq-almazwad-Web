@@ -102,4 +102,74 @@ INSERT INTO public.app_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
 
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
 GRANT ALL ON TABLE public.users, public.tasks, public.submissions, public.app_config TO anon, authenticated;
+
+-- 5) كلمة مرور الأدمن في قاعدة البيانات (مشفّرة بـ bcrypt وممنوع قراءتها أو تعديلها مباشرة)
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE TABLE IF NOT EXISTS public.admin_secrets (
+  id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  pin_hash TEXT NOT NULL,
+  updated_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
+);
+
+ALTER TABLE public.admin_secrets ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.admin_secrets FROM PUBLIC, anon, authenticated;
+
+SET search_path TO public, extensions;
+INSERT INTO public.admin_secrets (id, pin_hash)
+VALUES (1, crypt('2026', gen_salt('bf', 10)))
+ON CONFLICT (id) DO NOTHING;
+
+CREATE OR REPLACE FUNCTION public.verify_admin_pin(input_pin TEXT)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  stored_hash TEXT;
+BEGIN
+  IF input_pin IS NULL OR length(trim(input_pin)) = 0 THEN
+    RETURN FALSE;
+  END IF;
+  SELECT pin_hash INTO stored_hash FROM public.admin_secrets WHERE id = 1;
+  IF stored_hash IS NULL THEN
+    RETURN FALSE;
+  END IF;
+  RETURN (crypt(trim(input_pin), stored_hash) = stored_hash);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.update_admin_pin(current_pin TEXT, new_pin TEXT)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  stored_hash TEXT;
+BEGIN
+  IF current_pin IS NULL OR new_pin IS NULL OR length(trim(new_pin)) < 4 THEN
+    RETURN FALSE;
+  END IF;
+  SELECT pin_hash INTO stored_hash FROM public.admin_secrets WHERE id = 1;
+  IF stored_hash IS NULL THEN
+    RETURN FALSE;
+  END IF;
+  IF crypt(trim(current_pin), stored_hash) <> stored_hash THEN
+    RETURN FALSE;
+  END IF;
+  UPDATE public.admin_secrets
+  SET pin_hash = crypt(trim(new_pin), gen_salt('bf', 10)),
+      updated_at = (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
+  WHERE id = 1;
+  RETURN TRUE;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.verify_admin_pin(TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.update_admin_pin(TEXT, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.verify_admin_pin(TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.update_admin_pin(TEXT, TEXT) TO anon, authenticated;
+
 NOTIFY pgrst, 'reload schema';`;

@@ -286,6 +286,8 @@ export function useChallengeApp() {
   const logoutYouth = useCallback(() => {
     localStore.setActiveUserId(null);
     setActiveUserId(null);
+    setIsAdminUnlocked(false);
+    setIsAdminOpen(false);
     setSelectedTab('daily');
     showToast('تم تسجيل الخروج بنجاح');
   }, [showToast]);
@@ -360,15 +362,41 @@ export function useChallengeApp() {
   }, []);
 
   const unlockAdmin = useCallback(
-    async (pin: string): Promise<boolean> => {
-      const ok = await localStore.verifyAdminPin(pin);
+    async (pin: string): Promise<{ ok: boolean; error?: string }> => {
+      const cleanPin = pin.trim();
+      if (!cleanPin) {
+        return { ok: false, error: 'يرجى إدخال كلمة مرور الأدمن' };
+      }
+
+      if (supabaseClient.isConfigured) {
+        try {
+          const ok = await supabaseClient.verifyAdminPin(cleanPin);
+          if (ok) {
+            setIsAdminUnlocked(true);
+            showToast('أهلاً بك في لوحة تحكم خدام التحدي');
+            void refreshNow();
+            return { ok: true };
+          }
+          return { ok: false, error: 'كلمة مرور الأدمن غير صحيحة' };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : '';
+          if (msg.includes('404')) {
+            return {
+              ok: false,
+              error: 'لم يتم تفعيل كلمة مرور الأدمن في قاعدة البيانات بعد — شغّل كود SQL في Supabase أولاً',
+            };
+          }
+          return { ok: false, error: 'تعذر التحقق من كلمة المرور عبر قاعدة البيانات، حاول مجدداً' };
+        }
+      }
+
+      const ok = await localStore.verifyAdminPin(cleanPin);
       if (ok) {
         setIsAdminUnlocked(true);
-        showToast('أهلاً بك في لوحة تحكم الخادم - مينا');
-        if (supabaseClient.isConfigured) void refreshNow();
-        return true;
+        showToast('أهلاً بك في لوحة تحكم خدام التحدي');
+        return { ok: true };
       }
-      return false;
+      return { ok: false, error: 'كلمة مرور الأدمن غير صحيحة' };
     },
     [showToast, refreshNow]
   );
@@ -651,20 +679,49 @@ export function useChallengeApp() {
   );
 
   const changeAdminPin = useCallback(
-    async (currentPin: string, newPin: string) => {
-      if (newPin.trim().length < 4) {
-        showToast('الرمز السري يجب أن يكون 4 أرقام على الأقل');
-        return;
+    async (currentPin: string, newPin: string): Promise<boolean> => {
+      if (!isAdminUnlocked) {
+        showToast('غير مسموح — يجب تسجيل الدخول كأدمن أولاً');
+        return false;
       }
-      const ok = await localStore.verifyAdminPin(currentPin);
+      const cleanCurrent = currentPin.trim();
+      const cleanNew = newPin.trim();
+      if (cleanNew.length < 4) {
+        showToast('كلمة المرور الجديدة يجب أن تكون 4 أحرف أو أرقام على الأقل');
+        return false;
+      }
+
+      if (supabaseClient.isConfigured) {
+        try {
+          const updated = await supabaseClient.updateAdminPin(cleanCurrent, cleanNew);
+          if (!updated) {
+            showToast('كلمة المرور الحالية غير صحيحة');
+            return false;
+          }
+          await localStore.updateAdminPin(cleanNew);
+          showToast('تم تحديث كلمة مرور الأدمن في قاعدة البيانات بنجاح ✅');
+          return true;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : '';
+          showToast(
+            msg.includes('404')
+              ? 'يرجى تشغيل كود SQL لتفعيل حفظ كلمة مرور الأدمن في Supabase أولاً'
+              : 'تعذر تحديث كلمة المرور في قاعدة البيانات'
+          );
+          return false;
+        }
+      }
+
+      const ok = await localStore.verifyAdminPin(cleanCurrent);
       if (!ok) {
-        showToast('الرمز السري الحالي غير صحيح');
-        return;
+        showToast('كلمة المرور الحالية غير صحيحة');
+        return false;
       }
-      await localStore.updateAdminPin(newPin.trim());
-      showToast('تم تغيير رمز دخول الأدمن بنجاح');
+      await localStore.updateAdminPin(cleanNew);
+      showToast('تم تغيير كلمة مرور الأدمن بنجاح');
+      return true;
     },
-    [showToast]
+    [isAdminUnlocked, showToast]
   );
 
   const exportLeaderboardCsv = useCallback(() => {

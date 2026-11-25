@@ -328,6 +328,33 @@ class SupabaseRestClient {
       }),
     });
   }
+
+  private buildRpcUrl(fnName: string): string {
+    return `${this.baseUrl}/rest/v1/rpc/${fnName}`;
+  }
+
+  async verifyAdminPin(pin: string): Promise<boolean> {
+    const resp = await this.request('verify_admin_pin', this.buildRpcUrl('verify_admin_pin'), {
+      method: 'POST',
+      headers: this.buildHeaders(),
+      body: JSON.stringify({ input_pin: pin.trim() }),
+    });
+    const data = await resp.json();
+    return data === true;
+  }
+
+  async updateAdminPin(currentPin: string, newPin: string): Promise<boolean> {
+    const resp = await this.request('update_admin_pin', this.buildRpcUrl('update_admin_pin'), {
+      method: 'POST',
+      headers: this.buildHeaders(),
+      body: JSON.stringify({
+        current_pin: currentPin.trim(),
+        new_pin: newPin.trim(),
+      }),
+    });
+    const data = await resp.json();
+    return data === true;
+  }
 }
 
 export const supabaseClient = new SupabaseRestClient();

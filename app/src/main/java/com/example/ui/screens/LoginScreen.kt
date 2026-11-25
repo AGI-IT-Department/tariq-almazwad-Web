@@ -125,13 +125,13 @@ fun LoginScreen(
                 ) {
                     Icon(
                         imageVector = Icons.Filled.AdminPanelSettings,
-                        contentDescription = "دخول الخادم / الأدمن",
+                        contentDescription = "دخول خدام التحدي",
                         tint = NativityBurgundy,
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = "دخول الخادم / الأدمن",
+                        text = "دخول خدام التحدي",
                         style = MaterialTheme.typography.labelLarge,
                         color = NativityBurgundy
                     )
@@ -307,7 +307,7 @@ fun LoginScreen(
             }
 
             Text(
-                text = "إذا نسيت رقمك السري، تواصل مع خادم الاجتماع (مينا) لإعادة تعيينه من لوحة التحكم.",
+                text = "إذا نسيت رقمك السري، تواصل مع خدام التحدي لإعادة تعيينه من لوحة التحكم.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,

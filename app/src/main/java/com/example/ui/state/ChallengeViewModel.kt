@@ -190,6 +190,8 @@ class ChallengeViewModel(application: Application) : AndroidViewModel(applicatio
     fun logoutYouth() {
         viewModelScope.launch {
             repository.logoutYouth()
+            _isAdminUnlocked.value = false
+            _isAdminOpen.value = false
             _selectedTab.value = YouthTab.DAILY
             emitMessage("تم تسجيل الخروج بنجاح")
         }
@@ -212,14 +214,23 @@ class ChallengeViewModel(application: Application) : AndroidViewModel(applicatio
         _isAdminOpen.value = false
     }
 
-    fun unlockAdmin(pin: String, onWrongPin: () -> Unit) {
+    fun unlockAdmin(pin: String, onError: (String) -> Unit) {
         viewModelScope.launch {
-            if (repository.verifyAdminPin(pin)) {
-                _isAdminUnlocked.value = true
-                emitMessage("أهلاً بك في لوحة تحكم الخادم - مينا")
-                if (repository.isSupabaseLive) refreshNow()
-            } else {
-                onWrongPin()
+            val res = repository.verifyAdminPin(pin)
+            res.onSuccess { ok ->
+                if (ok) {
+                    _isAdminUnlocked.value = true
+                    emitMessage("أهلاً بك في لوحة تحكم خدام التحدي")
+                    if (repository.isSupabaseLive) refreshNow()
+                } else {
+                    onError("كلمة مرور الأدمن غير صحيحة")
+                }
+            }.onFailure { err ->
+                val msg = err.message.orEmpty()
+                onError(
+                    if (msg.contains("404")) "لم يتم تفعيل كلمة مرور الأدمن في قاعدة البيانات بعد — شغّل كود SQL في Supabase أولاً"
+                    else "تعذر التحقق من كلمة المرور عبر قاعدة البيانات"
+                )
             }
         }
     }
@@ -306,10 +317,14 @@ class ChallengeViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun changeAdminPin(currentPin: String, newPin: String) {
+        if (!_isAdminUnlocked.value) {
+            emitMessage("غير مسموح — يجب تسجيل الدخول كأدمن أولاً")
+            return
+        }
         viewModelScope.launch {
             val result = repository.updateAdminPin(currentPin, newPin)
             result.onSuccess { emitMessage(it) }
-                .onFailure { emitMessage(it.message ?: "تعذر تغيير رمز الدخول") }
+                .onFailure { emitMessage(it.message ?: "تعذر تغيير كلمة المرور") }
         }
     }
 

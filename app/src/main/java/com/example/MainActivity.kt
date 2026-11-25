@@ -195,7 +195,7 @@ fun TariqAlMazwadApp(
                 topBar = {
                     NativityAppHeader(
                         isSupabaseLive = uiState.isSupabaseLive,
-                        pendingAdminCount = uiState.pendingSubmissions.size,
+                        pendingAdminCount = if (uiState.isAdminUnlocked) uiState.pendingSubmissions.size else 0,
                         onOpenAdmin = viewModel::openAdmin,
                         onOpenReminders = { showRemindersDialog = true },
                         onRefresh = viewModel::refreshNow,
