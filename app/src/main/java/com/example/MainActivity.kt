@@ -13,9 +13,11 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.material.icons.outlined.EmojiEvents
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.TaskAlt
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -52,6 +54,7 @@ import com.example.ui.screens.DailyTasksScreen
 import com.example.ui.screens.LoginScreen
 import com.example.ui.screens.MyLogScreen
 import com.example.ui.screens.MyRankScreen
+import com.example.ui.screens.ReadingPlanScreen
 import com.example.ui.screens.RemindersDialog
 import com.example.ui.screens.WelcomeScreen
 import com.example.ui.state.ChallengeViewModel
@@ -212,6 +215,7 @@ fun TariqAlMazwadApp(
                             val selected = uiState.selectedTab == tab
                             val (selectedIcon, unselectedIcon) = when (tab) {
                                 YouthTab.DAILY -> Icons.Filled.TaskAlt to Icons.Outlined.TaskAlt
+                                YouthTab.READING_PLAN -> Icons.Filled.MenuBook to Icons.Outlined.MenuBook
                                 YouthTab.MY_LOG -> Icons.Filled.History to Icons.Outlined.History
                                 YouthTab.MY_RANK -> Icons.Filled.EmojiEvents to Icons.Outlined.EmojiEvents
                             }
@@ -232,7 +236,7 @@ fun TariqAlMazwadApp(
                                 },
                                 colors = NavigationBarItemDefaults.colors(
                                     selectedIconColor = MidnightTeal,
-                                    selectedTextColor = MidnightTeal,
+                                    selectedTextColor = MaterialTheme.colorScheme.primary,
                                     indicatorColor = WarmGoldContainer
                                 ),
                                 modifier = Modifier.testTag("nav_tab_${tab.name.lowercase()}")
@@ -254,9 +258,14 @@ fun TariqAlMazwadApp(
                             YouthTab.DAILY -> DailyTasksScreen(
                                 uiState = uiState,
                                 onSubmitTask = viewModel::submitTask,
+                                onOpenReadingPlan = { viewModel.selectTab(YouthTab.READING_PLAN) },
                                 onOpenMyRank = { viewModel.selectTab(YouthTab.MY_RANK) },
                                 onOpenReminders = { showRemindersDialog = true },
                                 onLogout = { showLogoutDialog = true }
+                            )
+                            YouthTab.READING_PLAN -> ReadingPlanScreen(
+                                uiState = uiState,
+                                onSubmitTask = viewModel::submitTask
                             )
                             YouthTab.MY_LOG -> MyLogScreen(
                                 uiState = uiState

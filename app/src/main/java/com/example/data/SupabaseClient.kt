@@ -216,6 +216,19 @@ class SupabaseClient {
         }
     }
 
+    suspend fun deleteTask(taskId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val req = Request.Builder()
+                .url(buildUrl("tasks", mapOf("id" to "eq.$taskId")))
+                .withSupabaseHeaders("return=minimal")
+                .delete()
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) error("Supabase delete task HTTP ${resp.code}")
+            }
+        }
+    }
+
     suspend fun fetchSubmissions(): Result<List<TaskSubmission>> = withContext(Dispatchers.IO) {
         runCatching {
             val req = Request.Builder()
@@ -307,11 +320,21 @@ class SupabaseClient {
                 val arr = JSONArray(resp.body?.string() ?: "[]")
                 if (arr.length() == 0) return@use null
                 val o = arr.getJSONObject(0)
+                val rawQuestion = o.optString("weekly_quiz_question", "")
+                val meta = OfficialReadingPlan.extractMetaFromQuestion(rawQuestion)
+                val colWeek = if (o.has("active_week") && !o.isNull("active_week")) {
+                    o.optInt("active_week", 1).coerceIn(1, 5)
+                } else null
+                val colQJson = o.optString("weekly_quiz_questions_json", "").takeIf { it.isNotBlank() && it != "[]" }
+                val finalQJson = colQJson ?: meta.questionsJson ?: "[]"
+
                 AppConfigEntity(
                     id = 1,
+                    activeWeek = colWeek ?: meta.activeWeek ?: 1,
                     weeklyQuizTitle = o.optString("weekly_quiz_title", ""),
-                    weeklyQuizQuestion = o.optString("weekly_quiz_question", ""),
+                    weeklyQuizQuestion = meta.cleanQuestion,
                     weeklyQuizUrl = o.optString("weekly_quiz_url", ""),
+                    weeklyQuizQuestionsJson = finalQJson,
                     dailyVerseText = o.optString("daily_verse_text", ""),
                     dailyVerseRef = o.optString("daily_verse_ref", ""),
                     dailyEncouragement = o.optString("daily_encouragement", "")
@@ -322,11 +345,14 @@ class SupabaseClient {
 
     suspend fun upsertAppConfig(config: AppConfigEntity): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
-            val payload = JSONObject().apply {
+            val cleanQuestion = OfficialReadingPlan.stripMetaFromQuestion(config.weeklyQuizQuestion)
+            val fullPayload = JSONObject().apply {
                 put("id", 1)
+                put("active_week", config.activeWeek.coerceIn(1, 5))
                 put("weekly_quiz_title", config.weeklyQuizTitle)
-                put("weekly_quiz_question", config.weeklyQuizQuestion)
+                put("weekly_quiz_question", cleanQuestion)
                 put("weekly_quiz_url", config.weeklyQuizUrl)
+                put("weekly_quiz_questions_json", config.weeklyQuizQuestionsJson.ifBlank { "[]" })
                 put("daily_verse_text", config.dailyVerseText)
                 put("daily_verse_ref", config.dailyVerseRef)
                 put("daily_encouragement", config.dailyEncouragement)
@@ -334,10 +360,42 @@ class SupabaseClient {
             val req = Request.Builder()
                 .url(buildUrl("app_config"))
                 .withSupabaseHeaders("resolution=merge-duplicates,return=minimal")
-                .post(payload.toString().toRequestBody(jsonMediaType))
+                .post(fullPayload.toString().toRequestBody(jsonMediaType))
                 .build()
+            var needsFallback = false
             client.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) error("Supabase upsert config HTTP ${resp.code}")
+                if (!resp.isSuccessful) {
+                    val bodyStr = resp.body?.string().orEmpty()
+                    if (resp.code == 400 || bodyStr.contains("PGRST204") || bodyStr.contains("column")) {
+                        needsFallback = true
+                    } else {
+                        error("Supabase upsert config HTTP ${resp.code}")
+                    }
+                }
+            }
+            if (needsFallback) {
+                val encodedQuestion = OfficialReadingPlan.encodeQuestionWithMeta(
+                    cleanQuestion = cleanQuestion,
+                    activeWeek = config.activeWeek,
+                    questionsJson = config.weeklyQuizQuestionsJson
+                )
+                val fallbackPayload = JSONObject().apply {
+                    put("id", 1)
+                    put("weekly_quiz_title", config.weeklyQuizTitle)
+                    put("weekly_quiz_question", encodedQuestion)
+                    put("weekly_quiz_url", config.weeklyQuizUrl)
+                    put("daily_verse_text", config.dailyVerseText)
+                    put("daily_verse_ref", config.dailyVerseRef)
+                    put("daily_encouragement", config.dailyEncouragement)
+                }
+                val fbReq = Request.Builder()
+                    .url(buildUrl("app_config"))
+                    .withSupabaseHeaders("resolution=merge-duplicates,return=minimal")
+                    .post(fallbackPayload.toString().toRequestBody(jsonMediaType))
+                    .build()
+                client.newCall(fbReq).execute().use { resp ->
+                    if (!resp.isSuccessful) error("Supabase upsert config HTTP ${resp.code}")
+                }
             }
         }
     }

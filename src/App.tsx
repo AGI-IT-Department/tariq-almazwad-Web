@@ -9,6 +9,7 @@ import { RemindersModal } from './components/RemindersModal';
 import { WelcomeScreen } from './screens/WelcomeScreen';
 import { LoginScreen } from './screens/LoginScreen';
 import { DailyTasksScreen } from './screens/DailyTasksScreen';
+import { ReadingPlanScreen } from './screens/ReadingPlanScreen';
 import { MyLogScreen } from './screens/MyLogScreen';
 import { MyRankScreen } from './screens/MyRankScreen';
 import { AdminDashboardScreen } from './screens/AdminDashboardScreen';
@@ -107,10 +108,19 @@ export const App: React.FC = () => {
                 appConfig={app.appConfig}
                 reminderSettings={app.reminderSettings}
                 onSubmitTask={app.submitTask}
+                onOpenReadingPlan={() => app.setSelectedTab('plan')}
                 onOpenMyRank={() => app.setSelectedTab('my_rank')}
                 onOpenReminders={() => setShowReminders(true)}
                 onLogout={() => setShowLogoutConfirm(true)}
                 onFeedback={app.showToast}
+              />
+            )}
+            {app.selectedTab === 'plan' && (
+              <ReadingPlanScreen
+                allTasks={app.allTasks}
+                userSubmissions={app.userSubmissions}
+                appConfig={app.appConfig}
+                onSubmitTask={app.submitTask}
               />
             )}
             {app.selectedTab === 'my_log' && (

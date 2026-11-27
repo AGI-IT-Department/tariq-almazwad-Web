@@ -237,9 +237,11 @@ data class TaskSubmission(
 @Entity(tableName = "app_config")
 data class AppConfigEntity(
     @PrimaryKey val id: Int = 1,
+    val activeWeek: Int = 1,
     val weeklyQuizTitle: String = "مسابقة الأسبوع الأول • بشارة الميلاد",
     val weeklyQuizQuestion: String = "اقرأ أصحاح 1 و 2 من إنجيل معلمنا لوقا وشارك في المسابقة الأسبوعية للحصول على 200 نقطة!",
     val weeklyQuizUrl: String = "",
+    val weeklyQuizQuestionsJson: String = "[]",
     val dailyVerseText: String = "«المجد لله في الأعالي، وعلى الأرض السلام، وبالناس المسرة»",
     val dailyVerseRef: String = "إنجيل لوقا 2: 14",
     val dailyEncouragement: String = "كل خطوة في طريق المزود تقربنا لملك السلام. سجّل إنجازاتك اليومية ليعتمدها الخادم!"
@@ -338,4 +340,29 @@ object DefaultChallengeTasks {
             sortOrder = 9
         )
     )
+
+    val addonWeeklyTasks: List<ChallengeTask> = listOf(
+        ChallengeTask(
+            id = "task_incarnation_book",
+            title = "قراءة كتاب \"في تجسد الكلمة\" الأسبوعية",
+            description = "قراءة الجزء المقرر أسبوعياً من كتاب \"في تجسد الكلمة\" للقديس أثناسيوس الرسولي حسب منهج الأسبوع (200 نقطة أسبوعياً)",
+            points = 200,
+            frequency = TaskFrequency.WEEKLY.key,
+            iconKey = "book",
+            isActive = true,
+            sortOrder = 10
+        ),
+        ChallengeTask(
+            id = "task_weekly_exam_incarnation",
+            title = "المسابقة الأسبوعية (إنجيل + كتاب تجسد الكلمة)",
+            description = "المسابقة الأسبوعية كل أحد وتشمل قراءات الكتاب المقدس وفصول كتاب \"في تجسد الكلمة\" المقررة للأسبوع (200 نقطة أسبوعياً)",
+            points = 200,
+            frequency = TaskFrequency.WEEKLY.key,
+            iconKey = "quiz",
+            isActive = true,
+            sortOrder = 11
+        )
+    )
+
+    val allWithAddons: List<ChallengeTask> = all + addonWeeklyTasks
 }

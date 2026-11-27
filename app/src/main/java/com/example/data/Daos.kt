@@ -40,6 +40,9 @@ interface ChallengeTaskDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(tasks: List<ChallengeTask>)
+
+    @Query("DELETE FROM tasks WHERE id = :taskId")
+    suspend fun deleteById(taskId: String)
 }
 
 @Dao

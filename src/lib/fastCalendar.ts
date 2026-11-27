@@ -54,7 +54,7 @@ export const FastCalendar = {
   START_DATE: { year: 2026, month: 11, day: 30 } as FastDate,
   END_DATE: { year: 2027, month: 1, day: 5 } as FastDate,
   FAST_DAYS_COUNT: 37,
-  TOTAL_WEEKS: 6,
+  TOTAL_WEEKS: 5,
   TOP_PRIZE_RANKS: 10,
 
   currentFastDayIndex(today: FastDate = todayFastDate()): number {

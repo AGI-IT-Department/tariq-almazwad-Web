@@ -7,7 +7,9 @@ import {
   type TaskSubmission,
   type YouthTab,
   type YouthUser,
+  ADDON_WEEKLY_TASKS,
   STATUS_LABELS,
+  mergeMissingAddonTasks,
 } from '../types';
 import { FastCalendar, todayFastDate, toIsoString } from '../lib/fastCalendar';
 import {
@@ -143,8 +145,20 @@ export function useChallengeApp() {
       ]);
 
       if (remoteTasks.length > 0) {
-        setTasks(remoteTasks);
-        localStore.saveTasks(remoteTasks);
+        if (remoteTasks.some((t) => t.id === 'task_incarnation_reading')) {
+          await supabaseClient.deleteTask('task_incarnation_reading').catch(() => {});
+        }
+        const cleanedRemoteTasks = remoteTasks.filter((t) => t.id !== 'task_incarnation_reading');
+        const remoteIds = new Set(cleanedRemoteTasks.map((t) => t.id));
+        const missingAddons = ADDON_WEEKLY_TASKS.filter((t) => !remoteIds.has(t.id));
+        if (missingAddons.length > 0) {
+          await Promise.all(
+            missingAddons.map((addon) => supabaseClient.upsertTask(addon).catch(() => {}))
+          );
+        }
+        const mergedTasks = mergeMissingAddonTasks(cleanedRemoteTasks);
+        setTasks(mergedTasks);
+        localStore.saveTasks(mergedTasks);
       }
       setUsers(remoteUsers);
       localStore.saveUsers(remoteUsers);
@@ -425,6 +439,9 @@ export function useChallengeApp() {
 
       if (supabaseClient.isConfigured) {
         try {
+          if (ADDON_WEEKLY_TASKS.some((a) => a.id === task.id)) {
+            await supabaseClient.upsertTask(task).catch(() => {});
+          }
           await supabaseClient.upsertSubmission(submission);
         } catch (err) {
           showToast(`تعذر إرسال المشاركة لـ Supabase: ${err instanceof Error ? err.message : ''}`);

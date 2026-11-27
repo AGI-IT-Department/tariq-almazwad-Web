@@ -48,6 +48,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -74,8 +75,11 @@ import com.example.data.AppConfigEntity
 import com.example.data.ChallengeTask
 import com.example.data.FastCalendar
 import com.example.data.LeaderboardEntry
+import com.example.data.QuizQuestionType
 import com.example.data.TaskFrequency
 import com.example.data.TaskSubmission
+import com.example.data.WeeklyQuizQuestion
+import com.example.data.WeeklySyllabusSchedule
 import com.example.ui.components.formatTimestampArabic
 import com.example.ui.components.openWhatsAppChat
 import com.example.ui.state.AppUiState
@@ -1071,8 +1075,14 @@ private fun AdminTasksAndQuizTab(
     onEditTask: (ChallengeTask) -> Unit,
     onSaveConfig: (AppConfigEntity) -> Unit
 ) {
+    val decodedInitial = remember(config) {
+        val decoded = WeeklySyllabusSchedule.decodeQuizConfig(config.weeklyQuizQuestion)
+        val fromCol = WeeklySyllabusSchedule.parseQuestionsJson(config.weeklyQuizQuestionsJson)
+        decoded.copy(questions = if (fromCol.isNotEmpty()) fromCol else decoded.questions)
+    }
     var quizTitle by remember(config) { mutableStateOf(config.weeklyQuizTitle) }
-    var quizQuestion by remember(config) { mutableStateOf(config.weeklyQuizQuestion) }
+    var quizIntro by remember(config) { mutableStateOf(decodedInitial.introText) }
+    var quizQuestions by remember(config) { mutableStateOf(decodedInitial.questions) }
     var quizUrl by remember(config) { mutableStateOf(config.weeklyQuizUrl) }
     var verseText by remember(config) { mutableStateOf(config.dailyVerseText) }
     var verseRef by remember(config) { mutableStateOf(config.dailyVerseRef) }
@@ -1096,12 +1106,29 @@ private fun AdminTasksAndQuizTab(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text(
-                        text = "المسابقة الأسبوعية وآية اليوم",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MidnightTeal,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "المسابقة الأسبوعية وآية اليوم",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MidnightTeal,
+                            fontWeight = FontWeight.Bold
+                        )
+                        TextButton(
+                            onClick = {
+                                val week = WeeklySyllabusSchedule.getActiveWeek().activeWeek
+                                quizTitle = "المسابقة الأسبوعية • ${week.titleAr} (${week.examDateAr})"
+                                quizIntro = "تشمل مسابقة ${week.titleAr} قراءة ${week.bibleRangeAr} + كتاب \"في تجسد الكلمة\": ${week.incarnationBookAr}. أجب لتحصل على 200 نقطة!"
+                            },
+                            modifier = Modifier.testTag("admin_autofill_week_quiz_button")
+                        ) {
+                            Text("منهج الأسبوع الحالي ✨", style = MaterialTheme.typography.labelMedium, color = NativityBurgundy)
+                        }
+                    }
+
                     OutlinedTextField(
                         value = quizTitle,
                         onValueChange = { quizTitle = it },
@@ -1110,19 +1137,180 @@ private fun AdminTasksAndQuizTab(
                         modifier = Modifier.fillMaxWidth()
                     )
                     OutlinedTextField(
-                        value = quizQuestion,
-                        onValueChange = { quizQuestion = it },
-                        label = { Text("سؤال أو تفاصيل المسابقة الأسبوعية") },
+                        value = quizIntro,
+                        onValueChange = { quizIntro = it },
+                        label = { Text("وصف أو تعليمات المسابقة الأسبوعية") },
                         maxLines = 3,
                         modifier = Modifier.fillMaxWidth()
                     )
                     OutlinedTextField(
                         value = quizUrl,
                         onValueChange = { quizUrl = it },
-                        label = { Text("رابط المسابقة (Google Form - يبدأ بـ https://)") },
+                        label = { Text("رابط مسابقة خارجي اختياري (Google Form - يبدأ بـ https://)") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
+
+                    // Interactive MCQ / True-False Quiz Questions Builder
+                    Surface(
+                        color = NativityBurgundy.copy(alpha = 0.06f),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, NativityBurgundy.copy(alpha = 0.25f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "أسئلة المسابقة التفاعلية داخل التطبيق (${quizQuestions.size})",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = NativityBurgundy,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "أضف أسئلة اختيار من متعدد أو صح وخطأ لتظهر للشباب مباشرة داخل التطبيق (اختياري)",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = {
+                                        quizQuestions = quizQuestions + WeeklyQuizQuestion(
+                                            id = "q_${System.currentTimeMillis()}_${quizQuestions.size + 1}",
+                                            type = QuizQuestionType.MCQ,
+                                            prompt = "",
+                                            options = listOf("", "", "", ""),
+                                            correctIndex = 0
+                                        )
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = NativityBurgundy),
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("admin_add_mcq_question_button")
+                                ) {
+                                    Text("+ اختيار من متعدد", style = MaterialTheme.typography.labelSmall, color = Color.White)
+                                }
+                                Button(
+                                    onClick = {
+                                        quizQuestions = quizQuestions + WeeklyQuizQuestion(
+                                            id = "q_${System.currentTimeMillis()}_${quizQuestions.size + 1}",
+                                            type = QuizQuestionType.TF,
+                                            prompt = "",
+                                            options = listOf("صح", "خطأ"),
+                                            correctIndex = 0
+                                        )
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MidnightTeal),
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("admin_add_tf_question_button")
+                                ) {
+                                    Text("+ صح وخطأ", style = MaterialTheme.typography.labelSmall, color = Color.White)
+                                }
+                            }
+
+                            quizQuestions.forEachIndexed { qIdx, q ->
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surface,
+                                    shape = RoundedCornerShape(14.dp),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "سؤال ${qIdx + 1} • ${if (q.type == QuizQuestionType.TF) "صح وخطأ" else "اختيار من متعدد"}",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MidnightTeal,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            TextButton(
+                                                onClick = {
+                                                    quizQuestions = quizQuestions.filterIndexed { i, _ -> i != qIdx }
+                                                }
+                                            ) {
+                                                Text("حذف", color = RejectedRed, style = MaterialTheme.typography.labelSmall)
+                                            }
+                                        }
+
+                                        OutlinedTextField(
+                                            value = q.prompt,
+                                            onValueChange = { newPrompt ->
+                                                quizQuestions = quizQuestions.mapIndexed { i, item ->
+                                                    if (i == qIdx) item.copy(prompt = newPrompt) else item
+                                                }
+                                            },
+                                            label = { Text("نص السؤال") },
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+
+                                        Text(
+                                            text = "اختر الدائرة بجانب الإجابة الصحيحة:",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+
+                                        q.options.forEachIndexed { optIdx, optText ->
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                RadioButton(
+                                                    selected = q.correctIndex == optIdx,
+                                                    onClick = {
+                                                        quizQuestions = quizQuestions.mapIndexed { i, item ->
+                                                            if (i == qIdx) item.copy(correctIndex = optIdx) else item
+                                                        }
+                                                    }
+                                                )
+                                                if (q.type == QuizQuestionType.TF) {
+                                                    Text(
+                                                        text = optText,
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                } else {
+                                                    OutlinedTextField(
+                                                        value = optText,
+                                                        onValueChange = { newOpt ->
+                                                            quizQuestions = quizQuestions.mapIndexed { i, item ->
+                                                                if (i != qIdx) item
+                                                                else {
+                                                                    val updatedOpts = item.options.toMutableList()
+                                                                    updatedOpts[optIdx] = newOpt
+                                                                    item.copy(options = updatedOpts)
+                                                                }
+                                                            }
+                                                        },
+                                                        label = { Text("الاختيار ${optIdx + 1}") },
+                                                        singleLine = true,
+                                                        modifier = Modifier.weight(1f)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     OutlinedTextField(
                         value = verseText,
                         onValueChange = { verseText = it },
@@ -1149,9 +1337,11 @@ private fun AdminTasksAndQuizTab(
                             onSaveConfig(
                                 AppConfigEntity(
                                     id = 1,
+                                    activeWeek = config.activeWeek.coerceIn(1, 5),
                                     weeklyQuizTitle = quizTitle.trim(),
-                                    weeklyQuizQuestion = quizQuestion.trim(),
+                                    weeklyQuizQuestion = WeeklySyllabusSchedule.encodeQuizConfig(quizIntro, quizQuestions),
                                     weeklyQuizUrl = quizUrl.trim(),
+                                    weeklyQuizQuestionsJson = WeeklySyllabusSchedule.serializeQuestionsJson(quizQuestions),
                                     dailyVerseText = verseText.trim(),
                                     dailyVerseRef = verseRef.trim(),
                                     dailyEncouragement = encouragement.trim()

@@ -266,13 +266,13 @@ fun WelcomeScreen(
                     WelcomeHighlightChip(
                         icon = Icons.Filled.AutoAwesome,
                         title = "37 يوماً",
-                        subtitle = "صوم الميلاد",
+                        subtitle = "5 أسابيع صوم",
                         modifier = Modifier.weight(1f)
                     )
                     WelcomeHighlightChip(
                         icon = Icons.Filled.Star,
-                        title = "9 مهام",
-                        subtitle = "روحية يومية",
+                        title = "10 مهام",
+                        subtitle = "يومية وأسبوعية",
                         modifier = Modifier.weight(1f)
                     )
                     WelcomeHighlightChip(

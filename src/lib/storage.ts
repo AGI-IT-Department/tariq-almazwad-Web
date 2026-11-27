@@ -4,9 +4,10 @@ import {
   type ReminderSettings,
   type TaskSubmission,
   type YouthUser,
+  ALL_DEFAULT_CHALLENGE_TASKS,
   DEFAULT_APP_CONFIG,
-  DEFAULT_CHALLENGE_TASKS,
   DEFAULT_REMINDER_SETTINGS,
+  mergeMissingAddonTasks,
 } from '../types';
 import { PinHasher } from './securityAndExport';
 
@@ -59,11 +60,16 @@ export const localStore = {
   },
 
   getTasks(): ChallengeTask[] {
-    const stored = readJson<ChallengeTask[]>(KEYS.TASKS, []);
-    return stored.length > 0 ? stored : DEFAULT_CHALLENGE_TASKS;
+    const stored = readJson<ChallengeTask[]>(KEYS.TASKS, []).filter(
+      (t) => t.id !== 'task_incarnation_reading'
+    );
+    return stored.length > 0 ? mergeMissingAddonTasks(stored) : ALL_DEFAULT_CHALLENGE_TASKS;
   },
   saveTasks(tasks: ChallengeTask[]): void {
-    writeJson(KEYS.TASKS, tasks);
+    writeJson(
+      KEYS.TASKS,
+      tasks.filter((t) => t.id !== 'task_incarnation_reading')
+    );
   },
 
   getSubmissions(): TaskSubmission[] {
@@ -74,7 +80,18 @@ export const localStore = {
   },
 
   getAppConfig(): AppConfig {
-    return readJson<AppConfig>(KEYS.CONFIG, DEFAULT_APP_CONFIG);
+    const stored = readJson<Partial<AppConfig>>(KEYS.CONFIG, {});
+    return {
+      ...DEFAULT_APP_CONFIG,
+      ...stored,
+      activeWeek:
+        typeof stored.activeWeek === 'number' && stored.activeWeek >= 1 && stored.activeWeek <= 5
+          ? stored.activeWeek
+          : DEFAULT_APP_CONFIG.activeWeek,
+      weeklyQuizQuestions: Array.isArray(stored.weeklyQuizQuestions)
+        ? stored.weeklyQuizQuestions
+        : [],
+    };
   },
   saveAppConfig(config: AppConfig): void {
     writeJson(KEYS.CONFIG, config);

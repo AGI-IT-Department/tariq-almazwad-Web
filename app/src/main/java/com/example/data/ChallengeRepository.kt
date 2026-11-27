@@ -47,9 +47,21 @@ class ChallengeRepository(
     private val _pointsApprovalEvents = MutableSharedFlow<PointsApprovalNotice>(extraBufferCapacity = 6)
     val pointsApprovalEvents: SharedFlow<PointsApprovalNotice> = _pointsApprovalEvents.asSharedFlow()
 
+    companion object {
+        private const val DUPLICATE_TASK_ID = "task_incarnation_reading"
+    }
+
     suspend fun initializeAndSync(): Result<Unit> {
+        taskDao.deleteById(DUPLICATE_TASK_ID)
         if (taskDao.countTasks() == 0) {
-            taskDao.upsertAll(DefaultChallengeTasks.all)
+            taskDao.upsertAll(DefaultChallengeTasks.allWithAddons)
+        } else {
+            val localTasks = taskDao.observeAllTasks().first()
+            val localIds = localTasks.map { it.id }.toSet()
+            val missingLocal = DefaultChallengeTasks.addonWeeklyTasks.filter { it.id !in localIds }
+            if (missingLocal.isNotEmpty()) {
+                taskDao.upsertAll(missingLocal)
+            }
         }
         if (configDao.getConfig() == null) {
             configDao.upsert(AppConfigEntity())
@@ -64,9 +76,22 @@ class ChallengeRepository(
     suspend fun syncFromSupabase(): Result<Unit> {
         if (!supabase.isConfigured) return Result.success(Unit)
         return runCatching {
-            val remoteTasks = supabase.fetchTasks().getOrThrow()
+            val rawRemoteTasks = supabase.fetchTasks().getOrThrow()
+            if (rawRemoteTasks.any { it.id == DUPLICATE_TASK_ID }) {
+                supabase.deleteTask(DUPLICATE_TASK_ID)
+            }
+            taskDao.deleteById(DUPLICATE_TASK_ID)
+            val remoteTasks = rawRemoteTasks.filterNot { it.id == DUPLICATE_TASK_ID }
             if (remoteTasks.isNotEmpty()) {
                 taskDao.upsertAll(remoteTasks)
+                val remoteIds = remoteTasks.map { it.id }.toSet()
+                val missingAddons = DefaultChallengeTasks.addonWeeklyTasks.filter { it.id !in remoteIds }
+                if (missingAddons.isNotEmpty()) {
+                    missingAddons.forEach { addon ->
+                        supabase.upsertTask(addon)
+                    }
+                    taskDao.upsertAll(missingAddons)
+                }
             }
             val remoteUsers = supabase.fetchUsers().getOrThrow()
             if (remoteUsers.isNotEmpty()) {
@@ -258,6 +283,9 @@ class ChallengeRepository(
         )
 
         if (supabase.isConfigured) {
+            if (DefaultChallengeTasks.addonWeeklyTasks.any { it.id == task.id }) {
+                supabase.upsertTask(task)
+            }
             supabase.upsertSubmission(submission).onFailure {
                 return Result.failure(IllegalStateException("تعذر إرسال المشاركة لـ Supabase: ${it.message}"))
             }

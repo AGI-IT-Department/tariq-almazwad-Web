@@ -31,6 +31,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AccessTime
+import androidx.compose.material.icons.filled.Book
+import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.HourglassTop
@@ -65,6 +67,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -72,15 +75,22 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.R
-import com.example.data.BibleReadingPlan
 import com.example.data.ChallengeTask
 import com.example.data.FastCalendar
 import com.example.data.FastDate
+import com.example.data.OfficialBibleDayPlan
+import com.example.data.OfficialReadingPlan
 import com.example.data.SubmissionStatus
 import com.example.data.TaskFrequency
 import com.example.data.TaskSubmission
 import com.example.data.UrlValidator
+import com.example.data.WeeklyQuizQuestion
+import com.example.data.WeeklySyllabusItem
+import com.example.data.WeeklySyllabusSchedule
 import com.example.ui.components.DailyVerseBanner
+import com.example.ui.components.InAppBibleChapterReaderDialog
+import com.example.ui.components.InAppBookPdfReaderDialog
+import com.example.ui.components.InAppWeeklyQuizDialog
 import com.example.ui.components.StatusBadge
 import com.example.ui.components.TaskSubmissionBottomSheet
 import com.example.ui.components.formatTimeArabic
@@ -100,13 +110,28 @@ private enum class TaskFilter(val labelAr: String) {
     ALL("كل المهام"),
     DAILY("يومي"),
     WEEKLY("أسبوعي"),
-    ONCE("مرة في الصوم")
+    ONCE("مرة في التحدي")
 }
+
+private data class TaskGroupSection(
+    val frequency: TaskFrequency,
+    val titleAr: String,
+    val subtitleAr: String,
+    val tasks: List<ChallengeTask>
+)
+
+private data class ActiveQuizDialogState(
+    val task: ChallengeTask,
+    val questions: List<WeeklyQuizQuestion>,
+    val week: WeeklySyllabusItem,
+    val alreadySubmitted: Boolean
+)
 
 @Composable
 fun DailyTasksScreen(
     uiState: AppUiState,
     onSubmitTask: (ChallengeTask, String) -> Unit,
+    onOpenReadingPlan: () -> Unit = {},
     onOpenMyRank: () -> Unit,
     onOpenReminders: () -> Unit,
     onLogout: () -> Unit,
@@ -127,17 +152,60 @@ fun DailyTasksScreen(
     var selectedFilterIdx by remember { mutableIntStateOf(0) }
     var selectedTaskForSheet by remember { mutableStateOf<ChallengeTask?>(null) }
     var sheetInitialNote by remember { mutableStateOf("") }
+    var activeQuizDialog by remember { mutableStateOf<ActiveQuizDialogState?>(null) }
+    var showBookReader by remember { mutableStateOf(false) }
+    var showBibleReader by remember { mutableStateOf(false) }
 
-    val todayBibleReading = remember(
-        uiState.reminderSettings.bibleBookId,
-        uiState.reminderSettings.bibleStartDateIso,
-        today
-    ) {
-        BibleReadingPlan.getTodayReading(
-            startBookId = uiState.reminderSettings.bibleBookId,
-            startDateIso = uiState.reminderSettings.bibleStartDateIso,
-            today = today
-        )
+    val activeWeek = remember(today) { WeeklySyllabusSchedule.getActiveWeek(today).activeWeek }
+    val todayOfficialBible = remember(today) { WeeklySyllabusSchedule.getTodayOfficialBiblePlan(today) }
+
+    val decodedQuiz = remember(uiState.appConfig.weeklyQuizQuestion, uiState.appConfig.weeklyQuizQuestionsJson) {
+        val decoded = WeeklySyllabusSchedule.decodeQuizConfig(uiState.appConfig.weeklyQuizQuestion)
+        val cleanIntro = OfficialReadingPlan.stripMetaFromQuestion(decoded.introText)
+        val fromDedicatedJson = WeeklySyllabusSchedule.parseQuestionsJson(uiState.appConfig.weeklyQuizQuestionsJson)
+        val mergedQuestions = if (fromDedicatedJson.isNotEmpty()) fromDedicatedJson else decoded.questions
+        cleanIntro to mergedQuestions
+    }
+    val quizIntroText = decodedQuiz.first
+    val quizQuestions = decodedQuiz.second
+    val hasExternalQuizLink = remember(uiState.appConfig.weeklyQuizUrl) {
+        UrlValidator.isSafeHttpUrl(uiState.appConfig.weeklyQuizUrl)
+    }
+
+    val activeTasks = remember(uiState.allTasks) {
+        uiState.allTasks.filter { it.isActive }.sortedBy { it.sortOrder }
+    }
+
+    val bibleTask = remember(activeTasks) { activeTasks.firstOrNull { it.id == "task_bible_reading" } }
+    val incarnationTask = remember(activeTasks) { activeTasks.firstOrNull { it.id == "task_incarnation_book" } }
+
+    fun submissionForTask(task: ChallengeTask?): TaskSubmission? {
+        if (task == null) return null
+        val pk = FastCalendar.periodKeyForTask(TaskFrequency.fromKey(task.frequency), today)
+        return uiState.userSubmissions.firstOrNull { it.taskId == task.id && it.periodKey == pk }
+    }
+
+    val bibleSubToday = submissionForTask(bibleTask)
+    val isBibleLocked = isAfterEnd ||
+        bibleSubToday?.status == SubmissionStatus.PENDING.key ||
+        bibleSubToday?.status == SubmissionStatus.APPROVED.key
+
+    val incarnationSubThisWeek = submissionForTask(incarnationTask)
+    val isIncarnationLocked = isAfterEnd ||
+        incarnationSubThisWeek?.status == SubmissionStatus.PENDING.key ||
+        incarnationSubThisWeek?.status == SubmissionStatus.APPROVED.key
+
+    fun defaultNoteForTask(task: ChallengeTask): String = when (task.id) {
+        "task_bible_reading" -> "تمت قراءة ${todayOfficialBible.fullLabelAr}"
+        "task_incarnation_book" -> "تمت قراءة ورد ${activeWeek.titleAr} من كتاب «في تجسد الكلمة»"
+        "task_weekly_exam_incarnation", "task_weekly_quiz" ->
+            "${activeWeek.titleAr} (${activeWeek.examDateAr}) — إنجيل + كتاب في تجسد الكلمة"
+        else -> ""
+    }
+
+    fun openTaskSheet(task: ChallengeTask, customNote: String? = null) {
+        sheetInitialNote = customNote ?: defaultNoteForTask(task)
+        selectedTaskForSheet = task
     }
 
     selectedTaskForSheet?.let { task ->
@@ -156,11 +224,62 @@ fun DailyTasksScreen(
         )
     }
 
-    val activeTasks = remember(uiState.allTasks) {
-        uiState.allTasks.filter { it.isActive }.sortedBy { it.sortOrder }
+    activeQuizDialog?.let { dialogState ->
+        InAppWeeklyQuizDialog(
+            title = uiState.appConfig.weeklyQuizTitle,
+            week = dialogState.week,
+            questions = dialogState.questions,
+            alreadySubmitted = dialogState.alreadySubmitted,
+            onDismiss = { activeQuizDialog = null },
+            onSubmitQuizResult = { summary ->
+                onSubmitTask(dialogState.task, summary)
+                activeQuizDialog = null
+            }
+        )
     }
 
-    // Calculate live completion ring for current active period across all active tasks
+    if (showBookReader) {
+        InAppBookPdfReaderDialog(
+            initialWeekNumber = activeWeek.weekNumber,
+            activeWeekNumber = activeWeek.weekNumber,
+            points = incarnationTask?.points ?: 200,
+            isLocked = isIncarnationLocked,
+            statusLabel = when (incarnationSubThisWeek?.status) {
+                SubmissionStatus.APPROVED.key -> "تم اعتماد قراءة هذا الأسبوع ✅"
+                SubmissionStatus.PENDING.key -> "تم إرسال قراءة الأسبوع للمراجعة ⏳"
+                else -> null
+            },
+            onDismiss = { showBookReader = false },
+            onLogWeekReading = incarnationTask?.let { task ->
+                { week ->
+                    showBookReader = false
+                    openTaskSheet(task, "تمت قراءة ورد ${week.titleAr} من كتاب «في تجسد الكلمة»")
+                }
+            }
+        )
+    }
+
+    if (showBibleReader) {
+        InAppBibleChapterReaderDialog(
+            initialDayNumber = todayOfficialBible.dayNumber,
+            todayDayNumber = todayOfficialBible.dayNumber,
+            points = bibleTask?.points ?: 100,
+            isLocked = isBibleLocked,
+            statusLabel = when (bibleSubToday?.status) {
+                SubmissionStatus.APPROVED.key -> "تم اعتماد قراءة اليوم ✅"
+                SubmissionStatus.PENDING.key -> "تم إرسال قراءة اليوم للمراجعة ⏳"
+                else -> null
+            },
+            onDismiss = { showBibleReader = false },
+            onLogBibleReading = bibleTask?.let { task ->
+                { dayPlan ->
+                    showBibleReader = false
+                    openTaskSheet(task, "تمت قراءة ${dayPlan.fullLabelAr}")
+                }
+            }
+        )
+    }
+
     val completedNowCount = remember(activeTasks, uiState.userSubmissions, today) {
         activeTasks.count { task ->
             val periodKey = FastCalendar.periodKeyForTask(TaskFrequency.fromKey(task.frequency), today)
@@ -184,14 +303,37 @@ fun DailyTasksScreen(
         label = "pending_pts"
     )
 
-    val filteredTasks = remember(activeTasks, selectedFilterIdx) {
-        when (TaskFilter.entries[selectedFilterIdx]) {
-            TaskFilter.ALL -> activeTasks
-            TaskFilter.DAILY -> activeTasks.filter { TaskFrequency.fromKey(it.frequency) == TaskFrequency.DAILY }
-            TaskFilter.WEEKLY -> activeTasks.filter { TaskFrequency.fromKey(it.frequency) == TaskFrequency.WEEKLY }
-            TaskFilter.ONCE -> activeTasks.filter { TaskFrequency.fromKey(it.frequency) == TaskFrequency.ONCE }
+    // Strictly ordered sections: Daily -> Weekly -> Once
+    val visibleSections = remember(activeTasks, selectedFilterIdx) {
+        val allGroups = listOf(
+            TaskGroupSection(
+                frequency = TaskFrequency.DAILY,
+                titleAr = "المهام اليومية",
+                subtitleAr = "تُجدَّد كل يوم",
+                tasks = activeTasks.filter { TaskFrequency.fromKey(it.frequency) == TaskFrequency.DAILY }
+            ),
+            TaskGroupSection(
+                frequency = TaskFrequency.WEEKLY,
+                titleAr = "المهام الأسبوعية",
+                subtitleAr = "حسب منهج كل أسبوع",
+                tasks = activeTasks.filter { TaskFrequency.fromKey(it.frequency) == TaskFrequency.WEEKLY }
+            ),
+            TaskGroupSection(
+                frequency = TaskFrequency.ONCE,
+                titleAr = "مهام مرة في التحدي",
+                subtitleAr = "مرة واحدة خلال الصوم",
+                tasks = activeTasks.filter { TaskFrequency.fromKey(it.frequency) == TaskFrequency.ONCE }
+            )
+        )
+        val filtered = when (TaskFilter.entries[selectedFilterIdx]) {
+            TaskFilter.ALL -> allGroups
+            TaskFilter.DAILY -> allGroups.filter { it.frequency == TaskFrequency.DAILY }
+            TaskFilter.WEEKLY -> allGroups.filter { it.frequency == TaskFrequency.WEEKLY }
+            TaskFilter.ONCE -> allGroups.filter { it.frequency == TaskFrequency.ONCE }
         }
+        filtered.filter { it.tasks.isNotEmpty() }
     }
+    val visibleTaskCount = visibleSections.sumOf { it.tasks.size }
 
     Box(
         modifier = modifier.fillMaxSize(),
@@ -204,7 +346,7 @@ fun DailyTasksScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Interactive Nativity Hero Card with Animated Completion Ring + Private Rank Pill
+            // Interactive Nativity Hero Card
             item {
                 Card(
                     shape = RoundedCornerShape(26.dp),
@@ -297,7 +439,6 @@ fun DailyTasksScreen(
                                     }
                                 }
 
-                                // Animated Circular Progress Gauge for Tasks Done
                                 Box(
                                     contentAlignment = Alignment.Center,
                                     modifier = Modifier.size(76.dp)
@@ -341,7 +482,6 @@ fun DailyTasksScreen(
                                 }
                             }
 
-                            // Approved vs Pending Score Row
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -409,7 +549,7 @@ fun DailyTasksScreen(
                 }
             }
 
-            // Challenge Window Status Banner when outside 3/11/2026 — 5/1/2027
+            // Trial Mode Banner — automatically hidden starting Nov 30, 2026
             if (!isWithinWindow) {
                 item {
                     Card(
@@ -441,7 +581,7 @@ fun DailyTasksScreen(
                             )
                             Text(
                                 text = if (isBeforeStart) {
-                                    "جرّب تسجيل المهام الآن بحرية لتتعود على التطبيق! هذه النقاط تجريبية فقط، ومن يوم 30 نوفمبر 2026 تبدأ النتائج الرسمية من الصفر وتُحسب حتى 5 يناير 2027."
+                                    "جرّب تسجيل المهام الآن بحرية لتتعود على التطبيق! هذه النقاط تجريبية فقط، ومن يوم 30 نوفمبر 2026 يختفي هذا التنويه وتبدأ النتائج الرسمية من الصفر حتى 5 يناير 2027."
                                 } else {
                                     "انتهت فترة تسجيل المهام يوم 5 يناير 2027. يمكنك متابعة مركزك وسجلك بانتظار إعلان الفائزين الـ 10!"
                                 },
@@ -453,65 +593,7 @@ fun DailyTasksScreen(
                 }
             }
 
-            // Weekly Quiz Banner (when posted by Admin)
-            if (uiState.appConfig.weeklyQuizQuestion.isNotBlank()) {
-                item {
-                    Card(
-                        shape = RoundedCornerShape(22.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = NativityBurgundy.copy(alpha = 0.09f)
-                        ),
-                        border = BorderStroke(1.2.dp, NativityBurgundy.copy(alpha = 0.35f)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Quiz,
-                                    contentDescription = "المسابقة الأسبوعية",
-                                    tint = NativityBurgundy
-                                )
-                                Text(
-                                    text = uiState.appConfig.weeklyQuizTitle.ifBlank { "مسابقة نهاية الأسبوع" },
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = NativityBurgundy,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            Text(
-                                text = uiState.appConfig.weeklyQuizQuestion,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            if (UrlValidator.isSafeHttpUrl(uiState.appConfig.weeklyQuizUrl)) {
-                                OutlinedButton(
-                                    onClick = { openSafeExternalUrl(context, uiState.appConfig.weeklyQuizUrl) },
-                                    border = BorderStroke(1.dp, NativityBurgundy),
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.testTag("open_weekly_quiz_link_button")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.OpenInNew,
-                                        contentDescription = null,
-                                        tint = NativityBurgundy,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("فتح رابط المسابقة الأسبوعية", color = NativityBurgundy)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Daily Verse Banner
+            // Compact Daily Verse Banner
             item {
                 DailyVerseBanner(
                     verseText = uiState.appConfig.dailyVerseText,
@@ -521,123 +603,11 @@ fun DailyTasksScreen(
                 )
             }
 
-            // Daily Bible Reading Chapter & Custom Reminder Card
-            item {
-                val bibleTask = activeTasks.firstOrNull { it.id == "task_bible_reading" }
-                val bibleTaskSub = bibleTask?.let { bt ->
-                    val pk = FastCalendar.periodKeyForTask(TaskFrequency.fromKey(bt.frequency), today)
-                    uiState.userSubmissions.firstOrNull { it.taskId == bt.id && it.periodKey == pk }
-                }
-                val isBibleLocked = isAfterEnd ||
-                    bibleTaskSub?.status == SubmissionStatus.PENDING.key ||
-                    bibleTaskSub?.status == SubmissionStatus.APPROVED.key
-
-                Card(
-                    shape = RoundedCornerShape(22.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = BorderStroke(1.dp, MidnightTeal.copy(alpha = 0.22f)),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(MidnightTeal),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.MenuBook,
-                                    contentDescription = "ورد الكتاب المقدس اليوم",
-                                    tint = BrightGold,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "ورد الكتاب المقدس اليوم 📖",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = WarmGold,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = "${todayBibleReading.bookNameAr} — الإصحاح ${todayBibleReading.chapterNumber}",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.AccessTime,
-                                        contentDescription = null,
-                                        tint = MidnightTeal,
-                                        modifier = Modifier.size(13.dp)
-                                    )
-                                    Text(
-                                        text = "القراءة: ${formatTimeArabic(uiState.reminderSettings.bibleReadingHour, uiState.reminderSettings.bibleReadingMinute)} • الإنجازات: ${formatTimeArabic(uiState.reminderSettings.dailyTasksReminderHour, uiState.reminderSettings.dailyTasksReminderMinute)}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            if (bibleTask != null && !isBibleLocked) {
-                                Button(
-                                    onClick = {
-                                        sheetInitialNote = "تمت قراءة ${todayBibleReading.bookNameAr} — الإصحاح ${todayBibleReading.chapterNumber}"
-                                        selectedTaskForSheet = bibleTask
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = MidnightTeal),
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .testTag("log_today_bible_chapter_button")
-                                ) {
-                                    Text(
-                                        text = "سجّل الإصحاح (+${bibleTask.points})",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = Color.White
-                                    )
-                                }
-                            }
-                            OutlinedButton(
-                                onClick = onOpenReminders,
-                                shape = RoundedCornerShape(12.dp),
-                                border = BorderStroke(1.dp, MidnightTeal.copy(alpha = 0.35f)),
-                                modifier = Modifier.testTag("change_bible_plan_button")
-                            ) {
-                                Text(
-                                    text = "تغيير السفر والوقت ⏰",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MidnightTeal
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
             // Interactive Category Filter Chips
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "مهام طريق المزود (${filteredTasks.size})",
+                        text = "مهام طريق المزود ($visibleTaskCount)",
                         style = MaterialTheme.typography.titleLarge,
                         color = MaterialTheme.colorScheme.onBackground
                     )
@@ -659,21 +629,97 @@ fun DailyTasksScreen(
                 }
             }
 
-            // Interactive Task Cards
-            items(filteredTasks, key = { it.id }) { task ->
-                val freq = TaskFrequency.fromKey(task.frequency)
-                val periodKey = FastCalendar.periodKeyForTask(freq, today)
-                val existingSub = uiState.userSubmissions.firstOrNull {
-                    it.taskId == task.id && it.periodKey == periodKey
+            // Strictly Ordered Sections: Daily -> Weekly -> Once
+            visibleSections.forEach { section ->
+                if (TaskFilter.entries[selectedFilterIdx] == TaskFilter.ALL) {
+                    item(key = "header_${section.frequency.key}") {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp, start = 4.dp, end = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .clip(CircleShape)
+                                        .background(WarmGold)
+                                )
+                                Text(
+                                    text = section.titleAr,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Surface(
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                                    shape = RoundedCornerShape(50)
+                                ) {
+                                    Text(
+                                        text = "${section.tasks.size}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                            Text(
+                                text = section.subtitleAr,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
-                InteractiveTaskCard(
-                    task = task,
-                    frequency = freq,
-                    existingSubmission = existingSub,
-                    isBeforeStart = isBeforeStart,
-                    isAfterEnd = isAfterEnd,
-                    onSubmitClick = { selectedTaskForSheet = task }
-                )
+
+                items(section.tasks, key = { it.id }) { task ->
+                    val freq = TaskFrequency.fromKey(task.frequency)
+                    val periodKey = FastCalendar.periodKeyForTask(freq, today)
+                    val existingSub = uiState.userSubmissions.firstOrNull {
+                        it.taskId == task.id && it.periodKey == periodKey
+                    }
+                    val isLocked = isAfterEnd ||
+                        existingSub?.status == SubmissionStatus.PENDING.key ||
+                        existingSub?.status == SubmissionStatus.APPROVED.key
+
+                    InteractiveTaskCard(
+                        task = task,
+                        frequency = freq,
+                        existingSubmission = existingSub,
+                        isBeforeStart = isBeforeStart,
+                        isAfterEnd = isAfterEnd,
+                        activeWeek = activeWeek,
+                        todayOfficialBible = todayOfficialBible,
+                        bibleReminderTimeLabel = formatTimeArabic(
+                            uiState.reminderSettings.bibleReadingHour,
+                            uiState.reminderSettings.bibleReadingMinute
+                        ),
+                        quizIntroText = quizIntroText,
+                        quizQuestions = quizQuestions,
+                        hasExternalQuizLink = hasExternalQuizLink,
+                        onOpenBibleReader = { showBibleReader = true },
+                        onOpenReminders = onOpenReminders,
+                        onOpenBookReader = { showBookReader = true },
+                        onStartInAppQuiz = {
+                            activeQuizDialog = ActiveQuizDialogState(
+                                task = task,
+                                questions = quizQuestions,
+                                week = activeWeek,
+                                alreadySubmitted = isLocked
+                            )
+                        },
+                        onOpenExternalQuiz = {
+                            openSafeExternalUrl(context, uiState.appConfig.weeklyQuizUrl)
+                        },
+                        onSubmitClick = { openTaskSheet(task) }
+                    )
+                }
             }
 
             // Clean Logout Footer
@@ -713,6 +759,17 @@ private fun InteractiveTaskCard(
     existingSubmission: TaskSubmission?,
     isBeforeStart: Boolean,
     isAfterEnd: Boolean,
+    activeWeek: WeeklySyllabusItem,
+    todayOfficialBible: OfficialBibleDayPlan,
+    bibleReminderTimeLabel: String,
+    quizIntroText: String,
+    quizQuestions: List<WeeklyQuizQuestion>,
+    hasExternalQuizLink: Boolean,
+    onOpenBibleReader: () -> Unit,
+    onOpenReminders: () -> Unit,
+    onOpenBookReader: () -> Unit,
+    onStartInAppQuiz: () -> Unit,
+    onOpenExternalQuiz: () -> Unit,
     onSubmitClick: () -> Unit
 ) {
     val status = existingSubmission?.let { SubmissionStatus.fromKey(it.status) }
@@ -728,11 +785,15 @@ private fun InteractiveTaskCard(
         label = "task_card_border"
     )
 
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    val accentTeal = if (isDark) BrightGold else MidnightTeal
+    val accentBurgundy = if (isDark) Color(0xFFF3A7B4) else NativityBurgundy
+
     val iconBg by animateColorAsState(
         targetValue = when (status) {
             SubmissionStatus.APPROVED -> ApprovedEmerald.copy(alpha = 0.14f)
             SubmissionStatus.PENDING -> WarmGold.copy(alpha = 0.16f)
-            else -> MidnightTeal.copy(alpha = 0.1f)
+            else -> accentTeal.copy(alpha = 0.14f)
         },
         label = "task_icon_bg"
     )
@@ -741,10 +802,15 @@ private fun InteractiveTaskCard(
         targetValue = when (status) {
             SubmissionStatus.APPROVED -> ApprovedEmerald
             SubmissionStatus.PENDING -> WarmGold
-            else -> MidnightTeal
+            else -> accentTeal
         },
         label = "task_icon_tint"
     )
+
+    val isBibleTask = task.id == "task_bible_reading"
+    val isIncarnationTask = task.id == "task_incarnation_book"
+    val isWeeklyExamTask =
+        task.id == "task_weekly_exam_incarnation" || task.id == "task_weekly_quiz"
 
     Card(
         shape = RoundedCornerShape(22.dp),
@@ -833,6 +899,304 @@ private fun InteractiveTaskCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+
+            // INLINE: Daily Bible Plan + In-App Chapter Reader
+            if (isBibleTask) {
+                Surface(
+                    color = MaterialTheme.colorScheme.background,
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, accentTeal.copy(alpha = 0.28f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "📖 ورد اليوم (${activeWeek.titleAr} • ${todayOfficialBible.dateLabelAr})",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = accentTeal
+                            )
+                            Surface(
+                                color = accentTeal.copy(alpha = 0.14f),
+                                shape = RoundedCornerShape(50)
+                            ) {
+                                Text(
+                                    text = todayOfficialBible.shortLabelAr,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = accentTeal,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            text = todayOfficialBible.fullLabelAr,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "منهج الأسبوع: ${activeWeek.bibleRangeAr}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = onOpenBibleReader,
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = MidnightTeal),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("open_inapp_bible_reader_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.MenuBook,
+                                    contentDescription = null,
+                                    tint = BrightGold,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "اقرأ إصحاح اليوم",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = Color.White
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = onOpenReminders,
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, accentTeal.copy(alpha = 0.4f)),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                                modifier = Modifier.testTag("inline_bible_reminder_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.AccessTime,
+                                    contentDescription = "وقت التذكير",
+                                    tint = accentTeal,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = bibleReminderTimeLabel,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = accentTeal
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // INLINE: Weekly "On the Incarnation" Reading + In-App PDF Reader
+            if (isIncarnationTask) {
+                Surface(
+                    color = if (isDark) NativityBurgundy.copy(alpha = 0.22f) else PendingAmberBg.copy(alpha = 0.65f),
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, accentBurgundy.copy(alpha = 0.32f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "📚 ورد ${activeWeek.titleAr} (${activeWeek.dateRangeAr})",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = accentBurgundy
+                            )
+                            Surface(
+                                color = accentBurgundy.copy(alpha = 0.16f),
+                                shape = RoundedCornerShape(50)
+                            ) {
+                                Text(
+                                    text = "ص ${activeWeek.pdfStartPage} – ${activeWeek.pdfEndPage}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = accentBurgundy,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            text = activeWeek.incarnationBookAr,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Button(
+                            onClick = onOpenBookReader,
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = NativityBurgundy),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("open_inapp_book_reader_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Book,
+                                contentDescription = null,
+                                tint = BrightGold,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "اقرأ ورد هذا الأسبوع من الكتاب داخل التطبيق",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
+            }
+
+            // INLINE: Weekly Exam Syllabus + In-App Quiz / External Link
+            if (isWeeklyExamTask) {
+                Surface(
+                    color = if (isDark) NativityBurgundy.copy(alpha = 0.2f) else NativityBurgundy.copy(alpha = 0.06f),
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, accentBurgundy.copy(alpha = 0.32f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "${activeWeek.titleAr} (${activeWeek.dateRangeAr})",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = accentTeal
+                            )
+                            Surface(
+                                color = accentBurgundy.copy(alpha = 0.16f),
+                                shape = RoundedCornerShape(50)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.CalendarToday,
+                                        contentDescription = null,
+                                        tint = accentBurgundy,
+                                        modifier = Modifier.size(11.dp)
+                                    )
+                                    Text(
+                                        text = "${activeWeek.examLabelAr}: ${activeWeek.examDateAr}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = accentBurgundy
+                                    )
+                                }
+                            }
+                        }
+                        Text(
+                            text = "الإنجيل: ${activeWeek.bibleRangeAr}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "كتاب تجسد الكلمة: ${activeWeek.incarnationBookAr}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        if (quizIntroText.isNotBlank()) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.surface,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = quizIntroText,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(8.dp)
+                                )
+                            }
+                        }
+                        if (quizQuestions.isNotEmpty() || hasExternalQuizLink) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 2.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                if (quizQuestions.isNotEmpty()) {
+                                    Button(
+                                        onClick = onStartInAppQuiz,
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = NativityBurgundy),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("start_inline_weekly_quiz_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Quiz,
+                                            contentDescription = null,
+                                            tint = BrightGold,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "ابدأ المسابقة (${quizQuestions.size} أسئلة)",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = Color.White
+                                        )
+                                    }
+                                }
+                                if (hasExternalQuizLink) {
+                                    OutlinedButton(
+                                        onClick = onOpenExternalQuiz,
+                                        shape = RoundedCornerShape(12.dp),
+                                        border = BorderStroke(1.dp, accentBurgundy.copy(alpha = 0.45f)),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                                        modifier = Modifier.testTag("open_inline_quiz_url_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.OpenInNew,
+                                            contentDescription = "فتح رابط المسابقة",
+                                            tint = accentBurgundy,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "رابط المسابقة",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = accentBurgundy
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             if (status == SubmissionStatus.REJECTED && !existingSubmission?.adminNote.isNullOrBlank()) {

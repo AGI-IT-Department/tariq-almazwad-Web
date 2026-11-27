@@ -95,8 +95,8 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStartJourney }) 
 
           {/* 3 Compact Navy & Gold Highlights */}
           <div className="mt-5 grid w-full grid-cols-3 gap-2">
-            <HighlightChip icon={<Sparkles className="h-5 w-5 text-gold-bright" />} title="37 يوماً" subtitle="صوم الميلاد" />
-            <HighlightChip icon={<Star className="h-5 w-5 text-gold-bright" />} title="9 مهام" subtitle="روحية يومية" />
+            <HighlightChip icon={<Sparkles className="h-5 w-5 text-gold-bright" />} title="37 يوماً" subtitle="5 أسابيع صوم" />
+            <HighlightChip icon={<Star className="h-5 w-5 text-gold-bright" />} title="10 مهام" subtitle="يومية وأسبوعية" />
             <HighlightChip icon={<Gift className="h-5 w-5 text-gold-bright" />} title="أول 10" subtitle="جوائز مميزة" />
           </div>
         </div>

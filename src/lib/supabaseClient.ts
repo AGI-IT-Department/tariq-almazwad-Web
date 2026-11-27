@@ -6,6 +6,12 @@ import {
   normalizeFrequency,
   normalizeStatus,
 } from '../types';
+import {
+  encodeQuestionWithMeta,
+  extractQuizMetaFromQuestion,
+  parseQuizQuestionsJson,
+  stripQuizMetaFromQuestion,
+} from './readingPlan';
 
 function sanitizeSupabaseUrl(raw: string): string {
   const cleaned = (raw || '')
@@ -231,6 +237,14 @@ class SupabaseRestClient {
     });
   }
 
+  async deleteTask(taskId: string): Promise<void> {
+    await this.request(
+      'delete task',
+      this.buildUrl('tasks', { id: `eq.${taskId}` }),
+      { method: 'DELETE', headers: this.buildHeaders('return=minimal') }
+    );
+  }
+
   async fetchSubmissions(): Promise<TaskSubmission[]> {
     const resp = await this.request(
       'submissions',
@@ -302,11 +316,27 @@ class SupabaseRestClient {
     const arr = (await resp.json()) as Array<Record<string, unknown>>;
     if (!arr.length) return null;
     const o = arr[0];
+    const rawQuestion = String(o.weekly_quiz_question ?? '');
+    const meta = extractQuizMetaFromQuestion(rawQuestion);
+    const colActiveWeek =
+      typeof o.active_week === 'number' && o.active_week >= 1 && o.active_week <= 5
+        ? Math.round(o.active_week)
+        : null;
+    const colQuestions =
+      typeof o.weekly_quiz_questions_json === 'string' && o.weekly_quiz_questions_json.trim()
+        ? parseQuizQuestionsJson(o.weekly_quiz_questions_json)
+        : null;
+
     return {
       id: 1,
+      activeWeek: colActiveWeek ?? meta.activeWeek ?? 1,
       weeklyQuizTitle: String(o.weekly_quiz_title ?? ''),
-      weeklyQuizQuestion: String(o.weekly_quiz_question ?? ''),
+      weeklyQuizQuestion: meta.cleanQuestion,
       weeklyQuizUrl: String(o.weekly_quiz_url ?? ''),
+      weeklyQuizQuestions:
+        colQuestions && colQuestions.length > 0
+          ? colQuestions
+          : meta.questions ?? [],
       dailyVerseText: String(o.daily_verse_text ?? ''),
       dailyVerseRef: String(o.daily_verse_ref ?? ''),
       dailyEncouragement: String(o.daily_encouragement ?? ''),
@@ -314,19 +344,52 @@ class SupabaseRestClient {
   }
 
   async upsertAppConfig(config: AppConfig): Promise<void> {
-    await this.request('upsert app_config', this.buildUrl('app_config'), {
-      method: 'POST',
-      headers: this.buildHeaders('resolution=merge-duplicates,return=minimal'),
-      body: JSON.stringify({
-        id: 1,
-        weekly_quiz_title: config.weeklyQuizTitle,
-        weekly_quiz_question: config.weeklyQuizQuestion,
-        weekly_quiz_url: config.weeklyQuizUrl,
-        daily_verse_text: config.dailyVerseText,
-        daily_verse_ref: config.dailyVerseRef,
-        daily_encouragement: config.dailyEncouragement,
-      }),
-    });
+    const cleanQuestion = stripQuizMetaFromQuestion(config.weeklyQuizQuestion);
+    const encodedQuestion = encodeQuestionWithMeta(
+      cleanQuestion,
+      config.activeWeek,
+      config.weeklyQuizQuestions
+    );
+    const fullPayload = {
+      id: 1,
+      active_week: Math.min(Math.max(Math.round(config.activeWeek || 1), 1), 5),
+      weekly_quiz_title: config.weeklyQuizTitle,
+      weekly_quiz_question: cleanQuestion,
+      weekly_quiz_url: config.weeklyQuizUrl,
+      weekly_quiz_questions_json: JSON.stringify(config.weeklyQuizQuestions ?? []),
+      daily_verse_text: config.dailyVerseText,
+      daily_verse_ref: config.dailyVerseRef,
+      daily_encouragement: config.dailyEncouragement,
+    };
+
+    try {
+      await this.request('upsert app_config', this.buildUrl('app_config'), {
+        method: 'POST',
+        headers: this.buildHeaders('resolution=merge-duplicates,return=minimal'),
+        body: JSON.stringify(fullPayload),
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      // If Supabase hasn't run ALTER TABLE for active_week / weekly_quiz_questions_json yet,
+      // fall back seamlessly by storing metadata inside weekly_quiz_question
+      if (msg.includes('400') || msg.includes('PGRST204') || msg.includes('column')) {
+        await this.request('upsert app_config', this.buildUrl('app_config'), {
+          method: 'POST',
+          headers: this.buildHeaders('resolution=merge-duplicates,return=minimal'),
+          body: JSON.stringify({
+            id: 1,
+            weekly_quiz_title: config.weeklyQuizTitle,
+            weekly_quiz_question: encodedQuestion,
+            weekly_quiz_url: config.weeklyQuizUrl,
+            daily_verse_text: config.dailyVerseText,
+            daily_verse_ref: config.dailyVerseRef,
+            daily_encouragement: config.dailyEncouragement,
+          }),
+        });
+      } else {
+        throw err;
+      }
+    }
   }
 
   private buildRpcUrl(fnName: string): string {

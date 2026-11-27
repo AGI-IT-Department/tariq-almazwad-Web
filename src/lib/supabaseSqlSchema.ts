@@ -51,16 +51,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_submissions_unique_period
   ON public.submissions (user_id, task_id, period_key)
   WHERE status IN ('pending', 'approved');
 
--- 4) جدول إعدادات المسابقة الأسبوعية والآية اليومية (app_config)
+-- 4) جدول إعدادات المسابقة الأسبوعية وخطة القراءة والآية اليومية (app_config)
 CREATE TABLE IF NOT EXISTS public.app_config (
   id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-  weekly_quiz_title TEXT NOT NULL DEFAULT 'مسابقة نهاية الأسبوع',
+  active_week INTEGER NOT NULL DEFAULT 1,
+  weekly_quiz_title TEXT NOT NULL DEFAULT 'مسابقة الأسبوع الأول • إنجيل لوقا (1–7) وكتاب في تجسد الكلمة',
   weekly_quiz_question TEXT NOT NULL DEFAULT '',
   weekly_quiz_url TEXT NOT NULL DEFAULT '',
+  weekly_quiz_questions_json TEXT NOT NULL DEFAULT '[]',
   daily_verse_text TEXT NOT NULL DEFAULT '«المجد لله في الأعالي، وعلى الأرض السلام، وبالناس المسرة»',
   daily_verse_ref TEXT NOT NULL DEFAULT 'إنجيل لوقا 2: 14',
   daily_encouragement TEXT NOT NULL DEFAULT 'كل خطوة في طريق المزود تقربنا لملك السلام.'
 );
+
+ALTER TABLE public.app_config ADD COLUMN IF NOT EXISTS active_week INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE public.app_config ADD COLUMN IF NOT EXISTS weekly_quiz_questions_json TEXT NOT NULL DEFAULT '[]';
 
 -- تفعيل Row Level Security (RLS)
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
@@ -85,9 +90,11 @@ DROP POLICY IF EXISTS "allow_app_config_all" ON public.app_config;
 CREATE POLICY "allow_app_config_all" ON public.app_config
   FOR ALL USING (true) WITH CHECK (true);
 
--- إدخال المهام الـ 9 الأساسية لتحدي طريق المزود
+-- إدخال المهام الأساسية لتحدي طريق المزود
+DELETE FROM public.tasks WHERE id = 'task_incarnation_reading';
+
 INSERT INTO public.tasks (id, title, description, points, frequency, icon_key, is_active, sort_order) VALUES
-  ('task_bible_reading', 'قراءة الإنجيل اليومية', 'قراءة أصحاح يومي من الكتاب المقدس بتأمل', 100, 'daily', 'book', TRUE, 1),
+  ('task_bible_reading', 'قراءة الإنجيل اليومية', 'قراءة إصحاح يومي من خطة صوم الميلاد (لوقا، أفسس، فيلبي، كولوسي)', 100, 'daily', 'book', TRUE, 1),
   ('task_weekly_quiz', 'مسابقة نهاية الأسبوع', 'المشاركة والإجابة في المسابقة الأسبوعية للاجتماع', 200, 'weekly', 'quiz', TRUE, 2),
   ('task_confession', 'سر الاعتراف', 'ممارسة سر التوبة والاعتراف خلال صوم الميلاد', 200, 'once', 'confession', TRUE, 3),
   ('task_liturgy', 'حضور القداس والتناول', 'حضور القداس الإلهي والتناول من الأسرار المقدسة', 100, 'weekly', 'church', TRUE, 4),
@@ -95,7 +102,9 @@ INSERT INTO public.tasks (id, title, description, points, frequency, icon_key, i
   ('task_meeting', 'حضور الاجتماع أو التلمذة', 'حضور اجتماع أبو سيفين للشباب الخريجين أو لقاء التلمذة', 100, 'weekly', 'groups', TRUE, 6),
   ('task_agpeya', 'صلاة الأجبية (ساعة على الأقل)', 'صلاة ساعة على الأقل يومياً من كتاب الأجبية المقدسة', 100, 'daily', 'prayer', TRUE, 7),
   ('task_jesus_prayer', 'صلاة يسوع', 'ترديد صلاة يسوع بتركيز وخشوع يومياً', 100, 'daily', 'heart', TRUE, 8),
-  ('task_fasting_metanoias', 'الصوم الانقطاعي والميطانيات', 'الالتزام بالصوم الانقطاعي والميطانيات حسب إرشاد أب الاعتراف', 100, 'daily', 'flame', TRUE, 9)
+  ('task_fasting_metanoias', 'الصوم الانقطاعي والميطانيات', 'الالتزام بالصوم الانقطاعي والميطانيات حسب إرشاد أب الاعتراف', 100, 'daily', 'flame', TRUE, 9),
+  ('task_incarnation_book', 'قراءة كتاب "في تجسد الكلمة" الأسبوعية', 'قراءة الجزء المقرر أسبوعياً من كتاب "في تجسد الكلمة" للقديس أثناسيوس الرسولي حسب منهج الأسبوع (200 نقطة أسبوعياً)', 200, 'weekly', 'book', TRUE, 10),
+  ('task_weekly_exam_incarnation', 'المسابقة الأسبوعية (إنجيل + كتاب تجسد الكلمة)', 'المسابقة الأسبوعية كل أحد وتشمل قراءات الكتاب المقدس وفصول كتاب "في تجسد الكلمة" المقررة للأسبوع (200 نقطة أسبوعياً)', 200, 'weekly', 'quiz', TRUE, 11)
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.app_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING;

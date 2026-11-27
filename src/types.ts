@@ -1,8 +1,10 @@
+import type { QuizQuestion } from './lib/readingPlan';
+
 export type TaskFrequency = 'daily' | 'weekly' | 'once';
 
 export type SubmissionStatus = 'pending' | 'approved' | 'rejected';
 
-export type YouthTab = 'daily' | 'my_log' | 'my_rank';
+export type YouthTab = 'daily' | 'plan' | 'my_log' | 'my_rank';
 
 export interface FastDate {
   year: number;
@@ -48,9 +50,11 @@ export interface TaskSubmission {
 
 export interface AppConfig {
   id: number;
+  activeWeek: number;
   weeklyQuizTitle: string;
   weeklyQuizQuestion: string;
   weeklyQuizUrl: string;
+  weeklyQuizQuestions: QuizQuestion[];
   dailyVerseText: string;
   dailyVerseRef: string;
   dailyEncouragement: string;
@@ -109,10 +113,12 @@ export const STATUS_LABELS: Record<SubmissionStatus, string> = {
 
 export const DEFAULT_APP_CONFIG: AppConfig = {
   id: 1,
+  activeWeek: 1,
   weeklyQuizTitle: 'مسابقة الأسبوع الأول • بشارة الميلاد',
   weeklyQuizQuestion:
     'اقرأ أصحاح 1 و 2 من إنجيل معلمنا لوقا وشارك في المسابقة الأسبوعية للحصول على 200 نقطة!',
   weeklyQuizUrl: '',
+  weeklyQuizQuestions: [],
   dailyVerseText: '«المجد لله في الأعالي، وعلى الأرض السلام، وبالناس المسرة»',
   dailyVerseRef: 'إنجيل لوقا 2: 14',
   dailyEncouragement:
@@ -240,6 +246,43 @@ export const DEFAULT_CHALLENGE_TASKS: ChallengeTask[] = [
     sortOrder: 9,
   },
 ];
+
+export const ADDON_WEEKLY_TASKS: ChallengeTask[] = [
+  {
+    id: 'task_incarnation_book',
+    title: 'قراءة كتاب "في تجسد الكلمة" الأسبوعية',
+    description:
+      'قراءة الجزء المقرر أسبوعياً من كتاب "في تجسد الكلمة" للقديس أثناسيوس الرسولي حسب منهج الأسبوع (200 نقطة أسبوعياً)',
+    points: 200,
+    frequency: 'weekly',
+    iconKey: 'book',
+    isActive: true,
+    sortOrder: 10,
+  },
+  {
+    id: 'task_weekly_exam_incarnation',
+    title: 'المسابقة الأسبوعية (إنجيل + كتاب تجسد الكلمة)',
+    description:
+      'المسابقة الأسبوعية كل أحد وتشمل قراءات الكتاب المقدس وفصول كتاب "في تجسد الكلمة" المقررة للأسبوع (200 نقطة أسبوعياً)',
+    points: 200,
+    frequency: 'weekly',
+    iconKey: 'quiz',
+    isActive: true,
+    sortOrder: 11,
+  },
+];
+
+export const ALL_DEFAULT_CHALLENGE_TASKS: ChallengeTask[] = [
+  ...DEFAULT_CHALLENGE_TASKS,
+  ...ADDON_WEEKLY_TASKS,
+];
+
+export function mergeMissingAddonTasks(existing: ChallengeTask[]): ChallengeTask[] {
+  const existingIds = new Set(existing.map((t) => t.id));
+  const missing = ADDON_WEEKLY_TASKS.filter((t) => !existingIds.has(t.id));
+  if (missing.length === 0) return existing;
+  return [...existing, ...missing].sort((a, b) => a.sortOrder - b.sortOrder);
+}
 
 export function normalizeFrequency(key: string): TaskFrequency {
   const lower = (key || '').toLowerCase();

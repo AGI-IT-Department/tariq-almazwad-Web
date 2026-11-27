@@ -31,7 +31,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 enum class YouthTab(val titleAr: String) {
-    DAILY("اليوميات"),
+    DAILY("المهام"),
+    READING_PLAN("خطة القراءة"),
     MY_LOG("سجلي"),
     MY_RANK("مركزي")
 }
