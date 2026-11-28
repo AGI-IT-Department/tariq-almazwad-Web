@@ -9,6 +9,7 @@ import {
   formatBibleReminderNotification,
   getTodayBibleReading,
 } from './bibleReadingPlan';
+import { getTodayAutoDevotion } from './autoContent';
 import { localStore } from './storage';
 
 export interface PointsApprovalNotice {
@@ -275,16 +276,19 @@ export async function checkAndFireScheduledReminders(
     );
   }
 
-  // 5. Daily encouragement reminder
+  // 5. Daily encouragement reminder (automatic verse + Coptic Orthodox Church Father quote)
   if (settings.dailyEncouragementEnabled) {
     await fireOnce(
       'daily_encouragement',
       settings.dailyEncouragementHour,
       settings.dailyEncouragementMinute,
-      () => ({
-        title: 'آية وتشجيع اليوم • تحدي طريق المزود ✨',
-        body: 'افتح التطبيق واقرأ آية اليوم وتابع تقدمك في تحديات صوم الميلاد المجيد.',
-      })
+      () => {
+        const devotion = getTodayAutoDevotion(today);
+        return {
+          title: `آية اليوم • ${devotion.verseRef} ✨`,
+          body: `${devotion.verseText} — ${devotion.fatherQuote} (${devotion.fatherName})`,
+        };
+      }
     );
   }
 }

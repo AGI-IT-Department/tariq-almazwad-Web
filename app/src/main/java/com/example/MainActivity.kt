@@ -163,6 +163,7 @@ fun TariqAlMazwadApp(
                     onAdminDeleteUser = viewModel::adminDeleteUser,
                     onUpdateTask = viewModel::updateTask,
                     onUpdateConfig = viewModel::updateAppConfig,
+                    onToggleQuizWeek = viewModel::toggleQuizWeek,
                     onExportCsv = viewModel::exportLeaderboardCsv,
                     onChangeAdminPin = viewModel::changeAdminPin,
                     onFeedback = { msg ->
@@ -258,6 +259,16 @@ fun TariqAlMazwadApp(
                             YouthTab.DAILY -> DailyTasksScreen(
                                 uiState = uiState,
                                 onSubmitTask = viewModel::submitTask,
+                                onSubmitAutoQuiz = { week, correct, total, points, taskId, onDone ->
+                                    viewModel.submitAutoQuizResult(
+                                        weekNumber = week,
+                                        correctCount = correct,
+                                        totalItems = total,
+                                        earnedPoints = points,
+                                        preferredTaskId = taskId,
+                                        onComplete = onDone
+                                    )
+                                },
                                 onOpenReadingPlan = { viewModel.selectTab(YouthTab.READING_PLAN) },
                                 onOpenMyRank = { viewModel.selectTab(YouthTab.MY_RANK) },
                                 onOpenReminders = { showRemindersDialog = true },
@@ -265,7 +276,17 @@ fun TariqAlMazwadApp(
                             )
                             YouthTab.READING_PLAN -> ReadingPlanScreen(
                                 uiState = uiState,
-                                onSubmitTask = viewModel::submitTask
+                                onSubmitTask = viewModel::submitTask,
+                                onSubmitAutoQuiz = { week, correct, total, points, taskId, onDone ->
+                                    viewModel.submitAutoQuizResult(
+                                        weekNumber = week,
+                                        correctCount = correct,
+                                        totalItems = total,
+                                        earnedPoints = points,
+                                        preferredTaskId = taskId,
+                                        onComplete = onDone
+                                    )
+                                }
                             )
                             YouthTab.MY_LOG -> MyLogScreen(
                                 uiState = uiState

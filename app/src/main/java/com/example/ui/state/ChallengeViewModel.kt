@@ -5,12 +5,14 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.AppConfigEntity
 import com.example.data.AppDatabase
+import com.example.data.AutoContentBank
 import com.example.data.BibleReadingPlan
 import com.example.data.ChallengeRepository
 import com.example.data.ChallengeTask
 import com.example.data.ExcelExporter
 import com.example.data.FastDate
 import com.example.data.LeaderboardEntry
+import com.example.data.OfficialReadingPlan
 import com.example.data.PreferencesManager
 import com.example.data.ReminderSettings
 import com.example.data.SubmissionStatus
@@ -220,6 +222,39 @@ class ChallengeViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun submitAutoQuizResult(
+        weekNumber: Int,
+        correctCount: Int,
+        totalItems: Int,
+        earnedPoints: Int,
+        preferredTaskId: String = "task_weekly_exam_incarnation",
+        onComplete: (Boolean) -> Unit = {}
+    ) {
+        val user = uiState.value.activeUser ?: return
+        val quiz = AutoContentBank.getAutoWeeklyQuiz(appContext, weekNumber)
+        viewModelScope.launch {
+            val result = repository.submitAutoQuizResult(
+                user = user,
+                weekNumber = weekNumber,
+                quizTitle = quiz.titleAr,
+                correctCount = correctCount,
+                totalItems = totalItems,
+                earnedPoints = earnedPoints,
+                maxPoints = quiz.maxPoints,
+                preferredTaskId = preferredTaskId,
+                date = FastDate.today()
+            )
+            result.onSuccess { msg ->
+                AutoContentBank.clearDraft(appContext, user.id, weekNumber)
+                emitMessage(msg)
+                onComplete(true)
+            }.onFailure { err ->
+                emitMessage(err.message ?: "تعذر حفظ نتيجة المسابقة")
+                onComplete(false)
+            }
+        }
+    }
+
     fun openAdmin() {
         _isAdminOpen.value = true
     }
@@ -330,6 +365,26 @@ class ChallengeViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun toggleQuizWeek(weekNumber: Int, enabled: Boolean) {
+        val nextConfig = OfficialReadingPlan.withToggledQuizWeek(
+            config = uiState.value.appConfig,
+            weekNumber = weekNumber,
+            enabled = enabled
+        )
+        val quiz = AutoContentBank.getAutoWeeklyQuiz(appContext, weekNumber)
+        viewModelScope.launch {
+            val result = repository.saveAppConfig(nextConfig)
+            result.onSuccess {
+                emitMessage(
+                    if (enabled) "تم تفعيل «${quiz.titleAr}» وظهورها للمشاركين الآن ✅"
+                    else "تم إيقاف «${quiz.titleAr}» وإخفاؤها عن المشاركين"
+                )
+            }.onFailure {
+                emitMessage(it.message ?: "تعذر حفظ حالة المسابقة")
+            }
+        }
+    }
+
     fun changeAdminPin(currentPin: String, newPin: String) {
         if (!_isAdminUnlocked.value) {
             emitMessage("غير مسموح — يجب تسجيل الدخول كأدمن أولاً")
@@ -388,15 +443,15 @@ class ChallengeViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun sendTestEncouragement() {
-        val cfg = uiState.value.appConfig
+        val devotion = AutoContentBank.getTodayAutoDevotion(appContext)
         val ok = ReminderScheduler.showNotificationNow(
             context = appContext,
             notificationId = ReminderScheduler.ID_INSTANT_TEST,
-            title = "تحدي طريق المزود ✨",
-            message = "${cfg.dailyVerseText} (${cfg.dailyVerseRef}) — ${cfg.dailyEncouragement}"
+            title = "آية اليوم • ${devotion.verseRef} ✨",
+            message = "${devotion.verseText} — ${devotion.fatherQuote} (${devotion.fatherName})"
         )
         emitMessage(
-            if (ok) "تم إرسال إشعار تشجيعي الآن!"
+            if (ok) "تم إرسال إشعار آية اليوم وقول الآباء الآن!"
             else "يرجى تفعيل صلاحية الإشعارات أولاً"
         )
     }

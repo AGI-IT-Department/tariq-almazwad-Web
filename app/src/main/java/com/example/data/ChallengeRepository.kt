@@ -300,6 +300,87 @@ class ChallengeRepository(
         )
     }
 
+    suspend fun submitAutoQuizResult(
+        user: YouthUser,
+        weekNumber: Int,
+        quizTitle: String,
+        correctCount: Int,
+        totalItems: Int,
+        earnedPoints: Int,
+        maxPoints: Int,
+        preferredTaskId: String = "task_weekly_exam_incarnation",
+        date: FastDate = FastDate.today()
+    ): Result<String> {
+        if (FastCalendar.isAfterEnd(date)) {
+            return Result.failure(
+                IllegalStateException("انتهت فترة التحدي يوم 5 يناير 2027 — تم إغلاق المسابقات")
+            )
+        }
+        val periodKey = AutoContentBank.autoQuizPeriodKey(weekNumber, date)
+        val allSubs = submissionDao.observeAllSubmissions().first()
+        val existing = allSubs.firstOrNull {
+            it.userId == user.id &&
+                it.periodKey == periodKey &&
+                it.status == SubmissionStatus.APPROVED.key
+        }
+        if (existing != null) {
+            return Result.failure(
+                IllegalStateException("لقد أتممت هذه المسابقة بالفعل وحصلت على ${existing.points} نقطة ✅")
+            )
+        }
+
+        val allTasksList = taskDao.observeAllTasks().first()
+        val targetTask = allTasksList.firstOrNull { it.id == preferredTaskId }
+            ?: allTasksList.firstOrNull { it.id == "task_weekly_exam_incarnation" }
+            ?: allTasksList.firstOrNull { it.id == "task_weekly_quiz" }
+        val resolvedTaskId = targetTask?.id ?: "task_weekly_exam_incarnation"
+        val isTrial = FastCalendar.isTrialMode(date)
+        val now = System.currentTimeMillis()
+        val safePoints = earnedPoints.coerceIn(0, maxPoints.coerceAtLeast(0))
+
+        val submission = TaskSubmission(
+            id = UUID.randomUUID().toString(),
+            userId = user.id,
+            userName = user.fullName,
+            taskId = resolvedTaskId,
+            taskTitle = "$quizTitle ($correctCount/$totalItems)",
+            points = safePoints,
+            periodKey = periodKey,
+            submissionDate = date.toIsoString(),
+            note = "تصحيح تلقائي فوري: $correctCount إجابة صحيحة من $totalItems (+$safePoints نقطة)",
+            status = SubmissionStatus.APPROVED.key,
+            adminNote = "تصحيح واعتماد تلقائي فوري من نظام المسابقات",
+            submittedAt = now,
+            reviewedAt = now
+        )
+
+        if (supabase.isConfigured) {
+            if (targetTask != null && DefaultChallengeTasks.addonWeeklyTasks.any { it.id == targetTask.id }) {
+                supabase.upsertTask(targetTask)
+            }
+            supabase.upsertSubmission(submission).onFailure {
+                return Result.failure(IllegalStateException("تعذر حفظ نتيجة المسابقة في Supabase: ${it.message}"))
+            }
+        }
+        submissionDao.upsert(submission)
+
+        // Prevent redundant approval toast on next 15s sync poll
+        preferences.getApprovalSnapshot(user.id)?.let { snap ->
+            preferences.saveApprovalSnapshot(
+                user.id,
+                ApprovalSnapshot(snap.seenApprovedIds + submission.id, snap.lastBonusPoints)
+            )
+        }
+
+        return Result.success(
+            if (isTrial) {
+                "مبروك! نتيجتك $safePoints/$maxPoints نقطة ($correctCount/$totalItems) وأُضيفت مباشرة لرصيدك (تجريبي 🧪)"
+            } else {
+                "مبروك! نتيجتك $safePoints/$maxPoints نقطة ($correctCount/$totalItems) وأُضيفت مباشرة لرصيدك 🎉"
+            }
+        )
+    }
+
     suspend fun reviewSubmission(
         submissionId: String,
         approve: Boolean,

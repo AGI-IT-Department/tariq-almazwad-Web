@@ -330,6 +330,7 @@ class SupabaseRestClient {
     return {
       id: 1,
       activeWeek: colActiveWeek ?? meta.activeWeek ?? 1,
+      enabledQuizWeeks: meta.enabledQuizWeeks ?? [1],
       weeklyQuizTitle: String(o.weekly_quiz_title ?? ''),
       weeklyQuizQuestion: meta.cleanQuestion,
       weeklyQuizUrl: String(o.weekly_quiz_url ?? ''),
@@ -345,16 +346,20 @@ class SupabaseRestClient {
 
   async upsertAppConfig(config: AppConfig): Promise<void> {
     const cleanQuestion = stripQuizMetaFromQuestion(config.weeklyQuizQuestion);
+    const enabledWeeks = Array.isArray(config.enabledQuizWeeks)
+      ? config.enabledQuizWeeks
+      : [1];
     const encodedQuestion = encodeQuestionWithMeta(
       cleanQuestion,
       config.activeWeek,
-      config.weeklyQuizQuestions
+      config.weeklyQuizQuestions,
+      enabledWeeks
     );
     const fullPayload = {
       id: 1,
       active_week: Math.min(Math.max(Math.round(config.activeWeek || 1), 1), 5),
       weekly_quiz_title: config.weeklyQuizTitle,
-      weekly_quiz_question: cleanQuestion,
+      weekly_quiz_question: encodedQuestion,
       weekly_quiz_url: config.weeklyQuizUrl,
       weekly_quiz_questions_json: JSON.stringify(config.weeklyQuizQuestions ?? []),
       daily_verse_text: config.dailyVerseText,

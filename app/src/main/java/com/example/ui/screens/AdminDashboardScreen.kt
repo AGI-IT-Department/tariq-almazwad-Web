@@ -1,8 +1,10 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.Chat
@@ -34,21 +37,25 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -64,25 +71,30 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.AppConfigEntity
+import com.example.data.AutoContentBank
+import com.example.data.AutoWeeklyQuiz
 import com.example.data.ChallengeTask
 import com.example.data.FastCalendar
 import com.example.data.LeaderboardEntry
-import com.example.data.QuizQuestionType
+import com.example.data.OfficialReadingPlan
 import com.example.data.TaskFrequency
 import com.example.data.TaskSubmission
-import com.example.data.WeeklyQuizQuestion
-import com.example.data.WeeklySyllabusSchedule
+import com.example.ui.components.AutoWeeklyQuizDialog
 import com.example.ui.components.formatTimestampArabic
 import com.example.ui.components.openWhatsAppChat
 import com.example.ui.state.AppUiState
+import com.example.ui.theme.AmiriFontFamily
 import com.example.ui.theme.ApprovedEmerald
 import com.example.ui.theme.BrightGold
 import com.example.ui.theme.MedalBronze
@@ -109,6 +121,7 @@ fun AdminDashboardScreen(
     onAdminDeleteUser: (userId: String) -> Unit,
     onUpdateTask: (ChallengeTask) -> Unit,
     onUpdateConfig: (AppConfigEntity) -> Unit,
+    onToggleQuizWeek: (Int, Boolean) -> Unit,
     onExportCsv: () -> Unit,
     onChangeAdminPin: (String, String) -> Unit,
     onFeedback: (String) -> Unit,
@@ -468,13 +481,15 @@ fun AdminDashboardScreen(
         ScrollableTabRow(
             selectedTabIndex = selectedTab,
             containerColor = MaterialTheme.colorScheme.surface,
-            contentColor = MidnightTeal,
+            contentColor = MaterialTheme.colorScheme.primary,
             edgePadding = 12.dp
         ) {
             tabs.forEachIndexed { index, title ->
                 Tab(
                     selected = selectedTab == index,
                     onClick = { selectedTab = index },
+                    selectedContentColor = MaterialTheme.colorScheme.primary,
+                    unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     text = { Text(title, style = MaterialTheme.typography.labelLarge) },
                     modifier = Modifier.testTag("admin_tab_$index")
                 )
@@ -509,7 +524,7 @@ fun AdminDashboardScreen(
                     config = uiState.appConfig,
                     onToggleTask = { task, active -> onUpdateTask(task.copy(isActive = active)) },
                     onEditTask = { editingTask = it },
-                    onSaveConfig = onUpdateConfig
+                    onToggleQuizWeek = onToggleQuizWeek
                 )
                 3 -> AdminExportAndSetupTab(
                     usersCount = uiState.allUsers.size,
@@ -773,7 +788,14 @@ private fun AdminLeaderboardAndUsersTab(
     onNoPhoneFeedback: () -> Unit
 ) {
     val context = LocalContext.current
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    val pointsTextColor = if (isDark) BrightGold else MidnightTeal
+    val prizeAccentColor = if (isDark) Color(0xFFF3A7B4) else NativityBurgundy
+    val deleteAccentColor = if (isDark) Color(0xFFFF8A96) else RejectedRed
+
     var query by remember { mutableStateOf("") }
+    var expandedUserId by remember { mutableStateOf<String?>(null) }
+
     val filtered = remember(entries, query) {
         if (query.isBlank()) entries
         else entries.filter {
@@ -786,19 +808,19 @@ private fun AdminLeaderboardAndUsersTab(
         modifier = Modifier
             .widthIn(max = 640.dp)
             .fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        contentPadding = PaddingValues(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         // Exclusive Admin Leaderboard Header + Add User Button
         item {
             Card(
-                shape = RoundedCornerShape(20.dp),
+                shape = RoundedCornerShape(18.dp),
                 colors = CardDefaults.cardColors(containerColor = MidnightTeal),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
                         text = "لوحة الأبطال الحصرية وإدارة الشباب 🏆",
@@ -808,9 +830,9 @@ private fun AdminLeaderboardAndUsersTab(
                     )
                     Text(
                         text = if (FastCalendar.isTrialMode()) {
-                            "الوضع التجريبي مفعل حالياً 🧪 • تبدأ النتائج الرسمية تلقائياً من الصفر يوم 30/11/2026 حتى 5/1/2027."
+                            "الوضع التجريبي مفعل حالياً 🧪 • اضغط على أي اسم لفتح التفاصيل والإجراءات."
                         } else {
-                            "الترتيب الرسمي الحصري للأدمن فقط (30/11/2026 — 5/1/2027) • يمكنك إدارة أي مشارك أو مراسلته واتساب مباشرة."
+                            "الترتيب الرسمي الحصري (30/11/2026 — 5/1/2027) • اضغط على أي اسم لفتح التفاصيل."
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.White.copy(alpha = 0.88f)
@@ -821,7 +843,7 @@ private fun AdminLeaderboardAndUsersTab(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(48.dp)
+                            .height(46.dp)
                             .testTag("admin_add_new_user_button")
                     ) {
                         Icon(Icons.Filled.PersonAdd, contentDescription = null, tint = MidnightTealDark)
@@ -853,7 +875,7 @@ private fun AdminLeaderboardAndUsersTab(
         if (filtered.isEmpty()) {
             item {
                 Card(
-                    shape = RoundedCornerShape(18.dp),
+                    shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -867,6 +889,7 @@ private fun AdminLeaderboardAndUsersTab(
         } else {
             items(filtered, key = { it.user.id }) { entry ->
                 val isTop10 = entry.rank in 1..FastCalendar.TOP_PRIZE_RANKS
+                val isExpanded = expandedUserId == entry.user.id
                 val medalColor = when (entry.rank) {
                     1 -> MedalGold
                     2 -> MedalSilver
@@ -875,189 +898,217 @@ private fun AdminLeaderboardAndUsersTab(
                 }
 
                 Card(
-                    shape = RoundedCornerShape(20.dp),
+                    shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     border = BorderStroke(
-                        width = if (entry.rank <= 3) 1.5.dp else 1.dp,
-                        color = if (entry.rank <= 3) medalColor else MaterialTheme.colorScheme.outlineVariant
+                        width = if (isExpanded) 1.5.dp else if (entry.rank <= 3) 1.2.dp else 0.8.dp,
+                        color = if (isExpanded) {
+                            WarmGold
+                        } else if (entry.rank <= 3) {
+                            medalColor
+                        } else {
+                            MaterialTheme.colorScheme.outlineVariant
+                        }
                     ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    elevation = CardDefaults.cardElevation(defaultElevation = if (isExpanded) 3.dp else 1.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable {
+                            expandedUserId = if (isExpanded) null else entry.user.id
+                        }
+                        .testTag("admin_user_row_${entry.user.id}")
                 ) {
-                    Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        // Top Row: Rank Badge + Name + Approved Points
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        // Compact Single-Line Summary Row
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(44.dp)
+                                    .size(32.dp)
                                     .clip(CircleShape)
                                     .background(medalColor),
                                 contentAlignment = Alignment.Center
                             ) {
-                                if (entry.rank <= 3) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Icon(
-                                            imageVector = Icons.Filled.WorkspacePremium,
-                                            contentDescription = "المركز ${entry.rank}",
-                                            tint = Color.White,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Text(
-                                            text = "#${entry.rank}",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = Color.White,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                } else {
-                                    Text(
-                                        text = "#${entry.rank}",
-                                        style = MaterialTheme.typography.titleSmall,
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-
-                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = entry.user.fullName,
-                                    style = MaterialTheme.typography.titleMedium,
+                                    text = "#${entry.rank}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = Color.White,
                                     fontWeight = FontWeight.Bold
                                 )
+                            }
+
+                            Text(
+                                text = entry.user.fullName,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            Surface(
+                                color = WarmGold.copy(alpha = if (isDark) 0.22f else 0.18f),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
                                 Text(
-                                    text = if (entry.user.phone.isNotBlank()) "📱 ${entry.user.phone}" else "بدون رقم واتساب",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    text = "${entry.totalApprovedPoints} نقطة",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = pointsTextColor,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                 )
-                                if (isTop10 && entry.totalApprovedPoints > 0) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                        modifier = Modifier.padding(top = 2.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Filled.CardGiftcard,
-                                            contentDescription = null,
-                                            tint = NativityBurgundy,
-                                            modifier = Modifier.size(13.dp)
+                            }
+
+                            Icon(
+                                imageVector = if (isExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                                contentDescription = if (isExpanded) "إخفاء التفاصيل" else "عرض التفاصيل",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        // Expandable Details & Actions
+                        AnimatedVisibility(visible = isExpanded) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        Text(
+                                            text = if (entry.user.phone.isNotBlank()) "📱 ${entry.user.phone}" else "بدون رقم واتساب",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                         Text(
-                                            text = "مؤهل للجائزة 🎁",
+                                            text = "بونص: ${entry.user.bonusPoints} • معلق: ${entry.pendingPoints} • مهام معتمدة: ${entry.approvedTasksCount}",
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = NativityBurgundy,
-                                            fontWeight = FontWeight.Bold
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
-                                }
-                            }
 
-                            Column(horizontalAlignment = Alignment.End) {
-                                Surface(
-                                    color = WarmGold.copy(alpha = 0.2f),
-                                    shape = RoundedCornerShape(10.dp)
+                                    if (isTop10 && entry.totalApprovedPoints > 0) {
+                                        Surface(
+                                            color = prizeAccentColor.copy(alpha = 0.14f),
+                                            shape = RoundedCornerShape(50)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.CardGiftcard,
+                                                    contentDescription = null,
+                                                    tint = prizeAccentColor,
+                                                    modifier = Modifier.size(13.dp)
+                                                )
+                                                Text(
+                                                    text = "مؤهل للجائزة",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = prizeAccentColor,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Action Row 1: Direct WhatsApp + Bonus/Deduction
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Text(
-                                        text = "${entry.totalApprovedPoints} نقطة",
-                                        style = MaterialTheme.typography.labelLarge,
-                                        color = MidnightTeal,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                                    )
-                                }
-                                Text(
-                                    text = "بونص: ${entry.user.bonusPoints} | معلق: ${entry.pendingPoints}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-
-                        // Action Row 1: Direct WhatsApp + Bonus/Deduction
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = {
-                                    if (entry.user.phone.isBlank()) {
-                                        onNoPhoneFeedback()
-                                    } else {
-                                        openWhatsAppChat(
-                                            context,
-                                            entry.user.phone,
-                                            "سلام ونعمة يا ${entry.user.fullName} ✨\nربنا يبارك جهادك في تحدي طريق المزود (مركزك الحالي #${entry.rank} برصيد ${entry.totalApprovedPoints} نقطة) — اجتماع أبو سيفين للشباب الخريجين"
-                                        )
+                                    Button(
+                                        onClick = {
+                                            if (entry.user.phone.isBlank()) {
+                                                onNoPhoneFeedback()
+                                            } else {
+                                                openWhatsAppChat(
+                                                    context,
+                                                    entry.user.phone,
+                                                    "سلام ونعمة يا ${entry.user.fullName} ✨\nربنا يبارك جهادك في تحدي طريق المزود (مركزك الحالي #${entry.rank} برصيد ${entry.totalApprovedPoints} نقطة) — اجتماع أبو سيفين للشباب الخريجين"
+                                                )
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = WhatsAppGreen),
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(44.dp)
+                                            .testTag("admin_whatsapp_${entry.user.id}")
+                                    ) {
+                                        Icon(Icons.Filled.Chat, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("واتساب مباشر", style = MaterialTheme.typography.labelMedium, color = Color.White)
                                     }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = WhatsAppGreen),
-                                shape = RoundedCornerShape(10.dp),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(44.dp)
-                                    .testTag("admin_whatsapp_${entry.user.id}")
-                            ) {
-                                Icon(Icons.Filled.Chat, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("واتساب مباشر", style = MaterialTheme.typography.labelMedium, color = Color.White)
-                            }
 
-                            Button(
-                                onClick = { onBonusClick(entry) },
-                                colors = ButtonDefaults.buttonColors(containerColor = MidnightTeal),
-                                shape = RoundedCornerShape(10.dp),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(44.dp)
-                                    .testTag("admin_bonus_${entry.user.id}")
-                            ) {
-                                Icon(Icons.Filled.AddCircle, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("إضافة / خصم", style = MaterialTheme.typography.labelMedium, color = Color.White)
-                            }
-                        }
+                                    Button(
+                                        onClick = { onBonusClick(entry) },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MidnightTeal),
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(44.dp)
+                                            .testTag("admin_bonus_${entry.user.id}")
+                                    ) {
+                                        Icon(Icons.Filled.AddCircle, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("إضافة / خصم", style = MaterialTheme.typography.labelMedium, color = Color.White)
+                                    }
+                                }
 
-                        // Action Row 2: Edit Info + Delete User
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            OutlinedButton(
-                                onClick = { onEditUserClick(entry) },
-                                shape = RoundedCornerShape(10.dp),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(44.dp)
-                                    .testTag("admin_edit_user_${entry.user.id}")
-                            ) {
-                                Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("تعديل البيانات / PIN", style = MaterialTheme.typography.labelMedium)
-                            }
+                                // Action Row 2: Edit Info + Delete User
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = { onEditUserClick(entry) },
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(44.dp)
+                                            .testTag("admin_edit_user_${entry.user.id}")
+                                    ) {
+                                        Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("تعديل البيانات / PIN", style = MaterialTheme.typography.labelMedium)
+                                    }
 
-                            OutlinedButton(
-                                onClick = { onDeleteUserClick(entry) },
-                                border = BorderStroke(1.dp, RejectedRed.copy(alpha = 0.7f)),
-                                shape = RoundedCornerShape(10.dp),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-                                modifier = Modifier
-                                    .weight(0.7f)
-                                    .height(44.dp)
-                                    .testTag("admin_delete_user_${entry.user.id}")
-                            ) {
-                                Icon(Icons.Filled.Delete, contentDescription = null, tint = RejectedRed, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("حذف", style = MaterialTheme.typography.labelMedium, color = RejectedRed)
+                                    OutlinedButton(
+                                        onClick = { onDeleteUserClick(entry) },
+                                        border = BorderStroke(1.dp, deleteAccentColor.copy(alpha = 0.7f)),
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                                        modifier = Modifier
+                                            .weight(0.7f)
+                                            .height(44.dp)
+                                            .testTag("admin_delete_user_${entry.user.id}")
+                                    ) {
+                                        Icon(Icons.Filled.Delete, contentDescription = null, tint = deleteAccentColor, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("حذف", style = MaterialTheme.typography.labelMedium, color = deleteAccentColor)
+                                    }
+                                }
                             }
                         }
                     }
@@ -1073,20 +1124,28 @@ private fun AdminTasksAndQuizTab(
     config: AppConfigEntity,
     onToggleTask: (ChallengeTask, Boolean) -> Unit,
     onEditTask: (ChallengeTask) -> Unit,
-    onSaveConfig: (AppConfigEntity) -> Unit
+    onToggleQuizWeek: (Int, Boolean) -> Unit
 ) {
-    val decodedInitial = remember(config) {
-        val decoded = WeeklySyllabusSchedule.decodeQuizConfig(config.weeklyQuizQuestion)
-        val fromCol = WeeklySyllabusSchedule.parseQuestionsJson(config.weeklyQuizQuestionsJson)
-        decoded.copy(questions = if (fromCol.isNotEmpty()) fromCol else decoded.questions)
+    val context = LocalContext.current
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    val accentTeal = if (isDark) BrightGold else MidnightTeal
+    val accentBurgundy = if (isDark) Color(0xFFF3A7B4) else NativityBurgundy
+
+    val allQuizzes = remember { AutoContentBank.getAllAutoWeeklyQuizzes(context) }
+    val enabledWeeks = remember(config.weeklyQuizQuestion) {
+        OfficialReadingPlan.getEnabledQuizWeeks(config)
     }
-    var quizTitle by remember(config) { mutableStateOf(config.weeklyQuizTitle) }
-    var quizIntro by remember(config) { mutableStateOf(decodedInitial.introText) }
-    var quizQuestions by remember(config) { mutableStateOf(decodedInitial.questions) }
-    var quizUrl by remember(config) { mutableStateOf(config.weeklyQuizUrl) }
-    var verseText by remember(config) { mutableStateOf(config.dailyVerseText) }
-    var verseRef by remember(config) { mutableStateOf(config.dailyVerseRef) }
-    var encouragement by remember(config) { mutableStateOf(config.dailyEncouragement) }
+    val todayDevotion = remember { AutoContentBank.getTodayAutoDevotion(context) }
+    var previewQuiz by remember { mutableStateOf<AutoWeeklyQuiz?>(null) }
+
+    previewQuiz?.let { quiz ->
+        AutoWeeklyQuizDialog(
+            quiz = quiz,
+            userId = "admin_preview",
+            adminPreview = true,
+            onDismiss = { previewQuiz = null }
+        )
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -1095,11 +1154,12 @@ private fun AdminTasksAndQuizTab(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // Automatic Weekly Quizzes Control Panel
         item {
             Card(
-                shape = RoundedCornerShape(20.dp),
+                shape = RoundedCornerShape(22.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(1.dp, WarmGold.copy(alpha = 0.5f)),
+                border = BorderStroke(1.2.dp, WarmGold.copy(alpha = 0.6f)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
@@ -1111,251 +1171,288 @@ private fun AdminTasksAndQuizTab(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "المسابقة الأسبوعية وآية اليوم",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MidnightTeal,
-                            fontWeight = FontWeight.Bold
-                        )
-                        TextButton(
-                            onClick = {
-                                val week = WeeklySyllabusSchedule.getActiveWeek().activeWeek
-                                quizTitle = "المسابقة الأسبوعية • ${week.titleAr} (${week.examDateAr})"
-                                quizIntro = "تشمل مسابقة ${week.titleAr} قراءة ${week.bibleRangeAr} + كتاب \"في تجسد الكلمة\": ${week.incarnationBookAr}. أجب لتحصل على 200 نقطة!"
-                            },
-                            modifier = Modifier.testTag("admin_autofill_week_quiz_button")
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.weight(1f)
                         ) {
-                            Text("منهج الأسبوع الحالي ✨", style = MaterialTheme.typography.labelMedium, color = NativityBurgundy)
+                            Icon(
+                                imageVector = Icons.Filled.AutoAwesome,
+                                contentDescription = null,
+                                tint = WarmGold,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "المسابقات الأسبوعية الأوتوماتيكية",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = accentTeal,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                        Surface(
+                            color = accentTeal.copy(alpha = 0.14f),
+                            shape = RoundedCornerShape(50)
+                        ) {
+                            Text(
+                                text = "مفعّل: ${enabledWeeks.size} / ${allQuizzes.size}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = accentTeal,
+                                fontWeight = FontWeight.ExtraBold,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
                         }
                     }
 
-                    OutlinedTextField(
-                        value = quizTitle,
-                        onValueChange = { quizTitle = it },
-                        label = { Text("عنوان المسابقة الأسبوعية") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = quizIntro,
-                        onValueChange = { quizIntro = it },
-                        label = { Text("وصف أو تعليمات المسابقة الأسبوعية") },
-                        maxLines = 3,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = quizUrl,
-                        onValueChange = { quizUrl = it },
-                        label = { Text("رابط مسابقة خارجي اختياري (Google Form - يبدأ بـ https://)") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
+                    Text(
+                        text = "جميع المسابقات جاهزة تلقائياً (100 سؤال لكل أسبوع: 40 اختيار من متعدد + 40 صح وخطأ + 20 توصيل × 2 نقطة = 200 نقطة). فعّل أي أسبوع ليظهر فوراً للمشاركين وتُصحّح إجاباتهم وتُضاف لرصيدهم مباشرة.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    // Interactive MCQ / True-False Quiz Questions Builder
-                    Surface(
-                        color = NativityBurgundy.copy(alpha = 0.06f),
-                        shape = RoundedCornerShape(16.dp),
-                        border = BorderStroke(1.dp, NativityBurgundy.copy(alpha = 0.25f)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                    allQuizzes.forEach { quiz ->
+                        val isEnabled = enabledWeeks.contains(quiz.weekNumber)
+                        val matchCount = quiz.match.sumOf { it.pairs.size }
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = if (isEnabled) {
+                                ApprovedEmerald.copy(alpha = if (isDark) 0.16f else 0.08f)
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                            },
+                            border = BorderStroke(
+                                1.dp,
+                                if (isEnabled) ApprovedEmerald.copy(alpha = 0.55f)
+                                else MaterialTheme.colorScheme.outlineVariant
+                            ),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(
-                                text = "أسئلة المسابقة التفاعلية داخل التطبيق (${quizQuestions.size})",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = NativityBurgundy,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = "أضف أسئلة اختيار من متعدد أو صح وخطأ لتظهر للشباب مباشرة داخل التطبيق (اختياري)",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Button(
-                                    onClick = {
-                                        quizQuestions = quizQuestions + WeeklyQuizQuestion(
-                                            id = "q_${System.currentTimeMillis()}_${quizQuestions.size + 1}",
-                                            type = QuizQuestionType.MCQ,
-                                            prompt = "",
-                                            options = listOf("", "", "", ""),
-                                            correctIndex = 0
-                                        )
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = NativityBurgundy),
-                                    shape = RoundedCornerShape(10.dp),
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .testTag("admin_add_mcq_question_button")
-                                ) {
-                                    Text("+ اختيار من متعدد", style = MaterialTheme.typography.labelSmall, color = Color.White)
-                                }
-                                Button(
-                                    onClick = {
-                                        quizQuestions = quizQuestions + WeeklyQuizQuestion(
-                                            id = "q_${System.currentTimeMillis()}_${quizQuestions.size + 1}",
-                                            type = QuizQuestionType.TF,
-                                            prompt = "",
-                                            options = listOf("صح", "خطأ"),
-                                            correctIndex = 0
-                                        )
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = MidnightTeal),
-                                    shape = RoundedCornerShape(10.dp),
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .testTag("admin_add_tf_question_button")
-                                ) {
-                                    Text("+ صح وخطأ", style = MaterialTheme.typography.labelSmall, color = Color.White)
-                                }
-                            }
-
-                            quizQuestions.forEachIndexed { qIdx, q ->
-                                Surface(
-                                    color = MaterialTheme.colorScheme.surface,
-                                    shape = RoundedCornerShape(14.dp),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                                    modifier = Modifier.fillMaxWidth()
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Column(
-                                        modifier = Modifier.padding(10.dp),
-                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(3.dp)
                                     ) {
                                         Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
                                             Text(
-                                                text = "سؤال ${qIdx + 1} • ${if (q.type == QuizQuestionType.TF) "صح وخطأ" else "اختيار من متعدد"}",
-                                                style = MaterialTheme.typography.labelMedium,
-                                                color = MidnightTeal,
-                                                fontWeight = FontWeight.Bold
+                                                text = quiz.titleAr,
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = MaterialTheme.colorScheme.onSurface
                                             )
-                                            TextButton(
-                                                onClick = {
-                                                    quizQuestions = quizQuestions.filterIndexed { i, _ -> i != qIdx }
-                                                }
+                                            Surface(
+                                                color = if (isEnabled) ApprovedEmerald else MaterialTheme.colorScheme.surfaceVariant,
+                                                shape = RoundedCornerShape(50)
                                             ) {
-                                                Text("حذف", color = RejectedRed, style = MaterialTheme.typography.labelSmall)
-                                            }
-                                        }
-
-                                        OutlinedTextField(
-                                            value = q.prompt,
-                                            onValueChange = { newPrompt ->
-                                                quizQuestions = quizQuestions.mapIndexed { i, item ->
-                                                    if (i == qIdx) item.copy(prompt = newPrompt) else item
-                                                }
-                                            },
-                                            label = { Text("نص السؤال") },
-                                            modifier = Modifier.fillMaxWidth()
-                                        )
-
-                                        Text(
-                                            text = "اختر الدائرة بجانب الإجابة الصحيحة:",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-
-                                        q.options.forEachIndexed { optIdx, optText ->
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                            ) {
-                                                RadioButton(
-                                                    selected = q.correctIndex == optIdx,
-                                                    onClick = {
-                                                        quizQuestions = quizQuestions.mapIndexed { i, item ->
-                                                            if (i == qIdx) item.copy(correctIndex = optIdx) else item
-                                                        }
-                                                    }
+                                                Text(
+                                                    text = if (isEnabled) "مفعّلة ✓" else "موقوفة",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = if (isEnabled) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                                                 )
-                                                if (q.type == QuizQuestionType.TF) {
-                                                    Text(
-                                                        text = optText,
-                                                        style = MaterialTheme.typography.bodyMedium,
-                                                        fontWeight = FontWeight.Bold
-                                                    )
-                                                } else {
-                                                    OutlinedTextField(
-                                                        value = optText,
-                                                        onValueChange = { newOpt ->
-                                                            quizQuestions = quizQuestions.mapIndexed { i, item ->
-                                                                if (i != qIdx) item
-                                                                else {
-                                                                    val updatedOpts = item.options.toMutableList()
-                                                                    updatedOpts[optIdx] = newOpt
-                                                                    item.copy(options = updatedOpts)
-                                                                }
-                                                            }
-                                                        },
-                                                        label = { Text("الاختيار ${optIdx + 1}") },
-                                                        singleLine = true,
-                                                        modifier = Modifier.weight(1f)
-                                                    )
-                                                }
                                             }
                                         }
+                                        Text(
+                                            text = quiz.subtitleAr,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = "${quiz.mcq.size} اختيار • ${quiz.tf.size} صح وخطأ • $matchCount توصيل = ${quiz.totalItems} سؤال (${quiz.maxPoints} نقطة)",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = accentBurgundy,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.width(8.dp))
+
+                                    Switch(
+                                        checked = isEnabled,
+                                        onCheckedChange = { checked ->
+                                            onToggleQuizWeek(quiz.weekNumber, checked)
+                                        },
+                                        modifier = Modifier.testTag("admin_toggle_quiz_week_${quiz.weekNumber}")
+                                    )
+                                }
+
+                                HorizontalDivider(
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = if (isEnabled) {
+                                            "ظاهرة للشباب • التصحيح فوري"
+                                        } else {
+                                            "مخفية حتى التفعيل"
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    OutlinedButton(
+                                        onClick = { previewQuiz = quiz },
+                                        shape = RoundedCornerShape(10.dp),
+                                        border = BorderStroke(1.dp, accentTeal.copy(alpha = 0.45f)),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                        modifier = Modifier.testTag("admin_preview_quiz_week_${quiz.weekNumber}")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Visibility,
+                                            contentDescription = null,
+                                            tint = accentTeal,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "معاينة الأسئلة",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = accentTeal,
+                                            fontWeight = FontWeight.Bold
+                                        )
                                     }
                                 }
                             }
                         }
                     }
+                }
+            }
+        }
 
-                    OutlinedTextField(
-                        value = verseText,
-                        onValueChange = { verseText = it },
-                        label = { Text("آية اليوم") },
-                        maxLines = 2,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = verseRef,
-                        onValueChange = { verseRef = it },
-                        label = { Text("الشاهد الكتابي") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = encouragement,
-                        onValueChange = { encouragement = it },
-                        label = { Text("رسالة تشجيعية يومية") },
-                        maxLines = 2,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Button(
-                        onClick = {
-                            onSaveConfig(
-                                AppConfigEntity(
-                                    id = 1,
-                                    activeWeek = config.activeWeek.coerceIn(1, 5),
-                                    weeklyQuizTitle = quizTitle.trim(),
-                                    weeklyQuizQuestion = WeeklySyllabusSchedule.encodeQuizConfig(quizIntro, quizQuestions),
-                                    weeklyQuizUrl = quizUrl.trim(),
-                                    weeklyQuizQuestionsJson = WeeklySyllabusSchedule.serializeQuestionsJson(quizQuestions),
-                                    dailyVerseText = verseText.trim(),
-                                    dailyVerseRef = verseRef.trim(),
-                                    dailyEncouragement = encouragement.trim()
-                                )
+        // Automatic Daily Verse + Coptic Orthodox Church Fathers Quote Live Preview
+        item {
+            Card(
+                shape = RoundedCornerShape(22.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(MidnightTealDark, MidnightTeal, MidnightTealDark)
                             )
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = MidnightTeal),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .testTag("admin_save_quiz_config_button")
+                        )
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("نشر المسابقة والآية للشباب", color = Color.White)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.MenuBook,
+                                contentDescription = null,
+                                tint = BrightGold,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "آية اليوم وأقوال آباء الكنيسة (تلقائي 100%)",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = BrightGold,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                        Surface(
+                            color = Color.White.copy(alpha = 0.14f),
+                            shape = RoundedCornerShape(50)
+                        ) {
+                            Text(
+                                text = "يتجدد يومياً ✨",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = BrightGold,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "تُختار آية اليوم تلقائياً من منهج الإنجيل اليومي مع قول لآباء الكنيسة القبطية الأرثوذكسية عن صوم الميلاد والتجسد، وتظهر فوراً للشباب وفي إشعارات التشجيع.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White.copy(alpha = 0.85f)
+                    )
+
+                    Surface(
+                        color = Color.White.copy(alpha = 0.12f),
+                        border = BorderStroke(1.dp, BrightGold.copy(alpha = 0.35f)),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Surface(
+                                color = WarmGold.copy(alpha = 0.25f),
+                                shape = RoundedCornerShape(50)
+                            ) {
+                                Text(
+                                    text = "منهج اليوم: ${todayDevotion.chapterLabel}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = BrightGold,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                )
+                            }
+                            Text(
+                                text = todayDevotion.verseText,
+                                fontFamily = AmiriFontFamily,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "— ${todayDevotion.verseRef}",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = BrightGold,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Surface(
+                                color = Color.Black.copy(alpha = 0.22f),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = "«${todayDevotion.fatherQuote}»",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color.White.copy(alpha = 0.95f)
+                                    )
+                                    Text(
+                                        text = "— ${todayDevotion.fatherName}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = BrightGold,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1365,7 +1462,8 @@ private fun AdminTasksAndQuizTab(
             Text(
                 text = "إدارة المهام الـ ${tasks.size} وقيمة النقاط",
                 style = MaterialTheme.typography.titleMedium,
-                color = MidnightTeal
+                color = accentTeal,
+                fontWeight = FontWeight.Bold
             )
         }
 

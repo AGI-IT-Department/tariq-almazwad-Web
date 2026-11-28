@@ -7,9 +7,11 @@ import {
   CheckCircle2,
   ClipboardCheck,
   Clock,
-  ExternalLink,
+  Eye,
   Hourglass,
+  Lock,
   LogOut,
+  Sparkles,
   Trophy,
   X,
 } from 'lucide-react';
@@ -25,21 +27,23 @@ import {
 } from '../types';
 import { FastCalendar, formatTimeArabic, todayFastDate } from '../lib/fastCalendar';
 import {
-  decodeQuizConfig,
   getActiveSyllabusWeek,
   getTodayOfficialBiblePlan,
-  type WeeklyQuizQuestion,
-  type WeeklySyllabusItem,
 } from '../lib/weeklySyllabus';
-import { stripQuizMetaFromQuestion } from '../lib/readingPlan';
-import { UrlValidator, openSafeExternalUrl, shareOrCopyText } from '../lib/securityAndExport';
+import {
+  findUserAutoQuizSubmission,
+  getAutoWeeklyQuiz,
+  getEnabledQuizWeeks,
+  getTodayAutoDevotion,
+} from '../lib/autoContent';
+import { shareOrCopyText } from '../lib/securityAndExport';
 import {
   DailyVerseBanner,
   StatusBadge,
   TaskIcon,
   TaskSubmissionSheet,
 } from '../components/SharedUi';
-import { InAppWeeklyQuizModal } from '../components/WeeklySyllabusAndQuiz';
+import { AutoWeeklyQuizModal } from '../components/AutoWeeklyQuizModal';
 import {
   InAppBibleChapterReaderModal,
   InAppBookPdfReaderModal,
@@ -60,6 +64,13 @@ interface DailyTasksScreenProps {
   appConfig: AppConfig;
   reminderSettings: ReminderSettings;
   onSubmitTask: (task: ChallengeTask, note: string) => void;
+  onSubmitAutoQuiz: (
+    weekNumber: number,
+    correctCount: number,
+    totalItems: number,
+    earnedPoints: number,
+    preferredTaskId?: string
+  ) => Promise<boolean>;
   onOpenReadingPlan?: () => void;
   onOpenMyRank: () => void;
   onOpenReminders: () => void;
@@ -94,6 +105,7 @@ export const DailyTasksScreen: React.FC<DailyTasksScreenProps> = ({
   appConfig,
   reminderSettings,
   onSubmitTask,
+  onSubmitAutoQuiz,
   onOpenMyRank,
   onOpenReminders,
   onLogout,
@@ -111,11 +123,10 @@ export const DailyTasksScreen: React.FC<DailyTasksScreenProps> = ({
   const [selectedFilter, setSelectedFilter] = useState<TaskFilter>('all');
   const [selectedTaskForSheet, setSelectedTaskForSheet] = useState<ChallengeTask | null>(null);
   const [sheetInitialNote, setSheetInitialNote] = useState('');
-  const [activeQuizModal, setActiveQuizModal] = useState<{
-    task: ChallengeTask;
-    questions: WeeklyQuizQuestion[];
-    week: WeeklySyllabusItem;
-    alreadySubmitted: boolean;
+  const [activeAutoQuiz, setActiveAutoQuiz] = useState<{
+    weekNumber: number;
+    completedPoints: number | null;
+    taskId: string;
   } | null>(null);
   const [showBookReader, setShowBookReader] = useState(false);
   const [showBibleReader, setShowBibleReader] = useState(false);
@@ -129,22 +140,8 @@ export const DailyTasksScreen: React.FC<DailyTasksScreenProps> = ({
 
   const { activeWeek } = useMemo(() => getActiveSyllabusWeek(today), [today]);
   const todayOfficialBible = useMemo(() => getTodayOfficialBiblePlan(today), [today]);
-
-  const decodedQuiz = useMemo(() => {
-    const decoded = decodeQuizConfig(appConfig.weeklyQuizQuestion);
-    const cleanIntro = stripQuizMetaFromQuestion(decoded.introText);
-    const mergedQuestions =
-      appConfig.weeklyQuizQuestions && appConfig.weeklyQuizQuestions.length > 0
-        ? appConfig.weeklyQuizQuestions
-        : decoded.questions;
-    return {
-      introText: cleanIntro,
-      questions: mergedQuestions,
-    };
-  }, [appConfig.weeklyQuizQuestion, appConfig.weeklyQuizQuestions]);
-
-  const hasInAppQuestions = decodedQuiz.questions.length > 0;
-  const hasExternalQuizLink = UrlValidator.isSafeHttpUrl(appConfig.weeklyQuizUrl);
+  const todayDevotion = useMemo(() => getTodayAutoDevotion(today), [today]);
+  const enabledQuizWeeks = useMemo(() => getEnabledQuizWeeks(appConfig), [appConfig]);
 
   const activeTasks = useMemo(
     () => allTasks.filter((t) => t.isActive).sort((a, b) => a.sortOrder - b.sortOrder),
@@ -191,11 +188,20 @@ export const DailyTasksScreen: React.FC<DailyTasksScreenProps> = ({
 
   const completedNowCount = useMemo(() => {
     return activeTasks.filter((task) => {
+      if (task.id === 'task_weekly_exam_incarnation' || task.id === 'task_weekly_quiz') {
+        if (
+          enabledQuizWeeks.some((w) =>
+            Boolean(findUserAutoQuizSubmission(userSubmissions, user.id, w, today))
+          )
+        ) {
+          return true;
+        }
+      }
       const periodKey = FastCalendar.periodKeyForTask(task.frequency, today);
       const sub = userSubmissions.find((s) => s.taskId === task.id && s.periodKey === periodKey);
       return sub && (sub.status === 'approved' || sub.status === 'pending');
     }).length;
-  }, [activeTasks, userSubmissions, today]);
+  }, [activeTasks, userSubmissions, today, enabledQuizWeeks, user.id]);
 
   const completionRatio = activeTasks.length === 0 ? 0 : completedNowCount / activeTasks.length;
 
@@ -265,17 +271,21 @@ export const DailyTasksScreen: React.FC<DailyTasksScreenProps> = ({
         />
       )}
 
-      {activeQuizModal && (
-        <InAppWeeklyQuizModal
-          title={appConfig.weeklyQuizTitle}
-          week={activeQuizModal.week}
-          questions={activeQuizModal.questions}
-          alreadySubmitted={activeQuizModal.alreadySubmitted}
-          onDismiss={() => setActiveQuizModal(null)}
-          onSubmitQuizResult={(summary) => {
-            onSubmitTask(activeQuizModal.task, summary);
-            setActiveQuizModal(null);
-          }}
+      {activeAutoQuiz && (
+        <AutoWeeklyQuizModal
+          quiz={getAutoWeeklyQuiz(activeAutoQuiz.weekNumber)}
+          userId={user.id}
+          completedPoints={activeAutoQuiz.completedPoints}
+          onSubmitResult={(weekNumber, correctCount, totalItems, earnedPoints) =>
+            onSubmitAutoQuiz(
+              weekNumber,
+              correctCount,
+              totalItems,
+              earnedPoints,
+              activeAutoQuiz.taskId
+            )
+          }
+          onClose={() => setActiveAutoQuiz(null)}
         />
       )}
 
@@ -479,11 +489,11 @@ export const DailyTasksScreen: React.FC<DailyTasksScreenProps> = ({
         </section>
       )}
 
-      {/* Compact Daily Verse Banner */}
+      {/* Automatic Daily Verse + Coptic Orthodox Fathers Encouragement Banner */}
       <DailyVerseBanner
-        verseText={appConfig.dailyVerseText}
-        reference={appConfig.dailyVerseRef}
-        encouragement={appConfig.dailyEncouragement}
+        verseText={todayDevotion.verseText}
+        reference={todayDevotion.verseRef}
+        encouragement={`«${todayDevotion.fatherQuote}» — ${todayDevotion.fatherName}`}
         onShare={async (text) => {
           const msg = await shareOrCopyText(text, 'آية اليوم في طريق المزود');
           onFeedback(msg);
@@ -568,9 +578,9 @@ export const DailyTasksScreen: React.FC<DailyTasksScreenProps> = ({
                 return (
                   <div
                     key={task.id}
-                    onClick={() => !isLocked && openTaskSubmission(task)}
+                    onClick={() => !isLocked && !isWeeklyExamTask && openTaskSubmission(task)}
                     className={`rounded-[22px] border bg-white p-4 transition ${borderClass} ${
-                      isLocked
+                      isLocked || isWeeklyExamTask
                         ? 'shadow-xs'
                         : 'cursor-pointer shadow-sm hover:shadow-md active:scale-[0.995]'
                     }`}
@@ -681,11 +691,11 @@ export const DailyTasksScreen: React.FC<DailyTasksScreenProps> = ({
                       </div>
                     )}
 
-                    {/* INLINE: Weekly Exam Syllabus + In-App Quiz / External Link */}
+                    {/* INLINE: Automatic 100-Question Weekly Quizzes (Direct Auto-Grading & Credit) */}
                     {isWeeklyExamTask && (
                       <div
                         onClick={(e) => e.stopPropagation()}
-                        className="mt-3 space-y-2 rounded-2xl border border-burgundy/25 bg-burgundy/5 p-3 text-xs"
+                        className="mt-3 space-y-2.5 rounded-2xl border border-burgundy/25 bg-burgundy/5 p-3 text-xs"
                       >
                         <div className="flex flex-wrap items-center justify-between gap-1.5">
                           <span className="font-extrabold text-midnight">
@@ -704,42 +714,86 @@ export const DailyTasksScreen: React.FC<DailyTasksScreenProps> = ({
                           <span className="font-bold text-burgundy">كتاب تجسد الكلمة: </span>
                           {activeWeek.incarnationBookAr}
                         </p>
-                        {decodedQuiz.introText && (
-                          <p className="rounded-xl bg-white/85 px-2.5 py-1.5 text-[11px] leading-relaxed text-ink-muted">
-                            {decodedQuiz.introText}
-                          </p>
-                        )}
-                        {(hasInAppQuestions || hasExternalQuizLink) && (
-                          <div className="flex flex-wrap items-center gap-2 pt-0.5">
-                            {hasInAppQuestions && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setActiveQuizModal({
-                                    task,
-                                    questions: decodedQuiz.questions,
-                                    week: activeWeek,
-                                    alreadySubmitted: isLocked,
-                                  })
-                                }
-                                className="inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl bg-burgundy px-3 text-xs font-bold text-white shadow-xs transition hover:opacity-95 active:scale-[0.98]"
-                              >
-                                <ClipboardCheck className="h-4 w-4 text-gold-bright" />
-                                <span>
-                                  ابدأ المسابقة داخل التطبيق ({decodedQuiz.questions.length} أسئلة)
-                                </span>
-                              </button>
-                            )}
-                            {hasExternalQuizLink && (
-                              <button
-                                type="button"
-                                onClick={() => openSafeExternalUrl(appConfig.weeklyQuizUrl)}
-                                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-burgundy/35 bg-white px-3 text-xs font-bold text-burgundy transition hover:bg-burgundy/5"
-                              >
-                                <ExternalLink className="h-3.5 w-3.5" />
-                                <span>فتح رابط المسابقة</span>
-                              </button>
-                            )}
+
+                        {enabledQuizWeeks.length === 0 ? (
+                          <div className="flex items-center gap-2 rounded-xl border border-parchment-outline bg-white/90 px-3 py-2.5 text-[11px] font-semibold text-ink-muted">
+                            <Lock className="h-4 w-4 shrink-0 text-gold-warm" />
+                            <span>
+                              لا توجد مسابقة مفعّلة حالياً — ستظهر هنا تلقائياً فور تفعيلها من خدام التحدي
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="space-y-2 pt-1">
+                            {enabledQuizWeeks.map((weekNum) => {
+                              const quiz = getAutoWeeklyQuiz(weekNum);
+                              const solvedSub = findUserAutoQuizSubmission(
+                                userSubmissions,
+                                user.id,
+                                weekNum,
+                                today
+                              );
+                              return (
+                                <div
+                                  key={weekNum}
+                                  className="space-y-2 rounded-xl border border-burgundy/20 bg-white p-2.5 shadow-2xs"
+                                >
+                                  <div className="flex flex-wrap items-center justify-between gap-1.5">
+                                    <span className="text-xs font-extrabold text-midnight">
+                                      {quiz.titleAr}
+                                    </span>
+                                    <span className="rounded-full bg-gold-warm/20 px-2 py-0.5 text-[10px] font-bold text-midnight">
+                                      {quiz.totalItems} سؤال • {quiz.maxPoints} نقطة
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-ink-muted">{quiz.subtitleAr}</p>
+
+                                  {solvedSub ? (
+                                    <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                                      <span className="inline-flex items-center gap-1 rounded-full bg-status-approvedBg px-2.5 py-1 text-[11px] font-extrabold text-status-approved">
+                                        <CheckCircle2 className="h-3.5 w-3.5" />
+                                        <span>
+                                          تم الحل والاعتماد: {solvedSub.points} / {quiz.maxPoints} نقطة
+                                        </span>
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setActiveAutoQuiz({
+                                            weekNumber: weekNum,
+                                            completedPoints: solvedSub.points,
+                                            taskId: task.id,
+                                          })
+                                        }
+                                        className="inline-flex h-9 items-center gap-1 rounded-xl border border-midnight/25 bg-parchment/50 px-3 text-[11px] font-bold text-midnight transition hover:bg-midnight hover:text-white"
+                                      >
+                                        <Eye className="h-3.5 w-3.5" />
+                                        <span>مراجعة الإجابات</span>
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      disabled={isAfterEnd}
+                                      onClick={() =>
+                                        setActiveAutoQuiz({
+                                          weekNumber: weekNum,
+                                          completedPoints: null,
+                                          taskId: task.id,
+                                        })
+                                      }
+                                      className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-burgundy px-3 text-xs font-bold text-white shadow-xs transition hover:opacity-95 active:scale-[0.98] disabled:opacity-50"
+                                    >
+                                      <ClipboardCheck className="h-4 w-4 text-gold-bright" />
+                                      <span>
+                                        {isAfterEnd
+                                          ? 'انتهت فترة التحدي'
+                                          : `ابدأ ${quiz.titleAr} الآن (${quiz.totalItems} سؤال • تصحيح فوري)`}
+                                      </span>
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
                         )}
                       </div>
@@ -751,45 +805,54 @@ export const DailyTasksScreen: React.FC<DailyTasksScreenProps> = ({
                       </p>
                     )}
 
-                    <div className="mt-3 flex items-center justify-between gap-2">
-                      {status ? (
-                        <StatusBadge status={status} />
-                      ) : (
-                        <span className="text-[11px] text-ink-muted">
-                          {isAfterEnd
-                            ? 'انتهت فترة التحدي (5/1/2027)'
-                            : isBeforeStart
-                              ? 'اضغط للتجربة في الوضع التجريبي 🧪'
-                              : 'اضغط لتسجيل إنجازك الآن'}
+                    {isWeeklyExamTask ? (
+                      <div className="mt-3 flex items-center justify-between gap-2 rounded-xl bg-parchment/60 px-3 py-2">
+                        <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-midnight">
+                          <Sparkles className="h-3.5 w-3.5 text-gold-warm" />
+                          <span>تصحيح وإضافة النقاط تلقائياً لرصيدك فور إنهاء المسابقة</span>
                         </span>
-                      )}
+                      </div>
+                    ) : (
+                      <div className="mt-3 flex items-center justify-between gap-2">
+                        {status ? (
+                          <StatusBadge status={status} />
+                        ) : (
+                          <span className="text-[11px] text-ink-muted">
+                            {isAfterEnd
+                              ? 'انتهت فترة التحدي (5/1/2027)'
+                              : isBeforeStart
+                                ? 'اضغط للتجربة في الوضع التجريبي 🧪'
+                                : 'اضغط لتسجيل إنجازك الآن'}
+                          </span>
+                        )}
 
-                      <button
-                        type="button"
-                        disabled={isLocked}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (!isLocked) openTaskSubmission(task);
-                        }}
-                        className={`h-11 shrink-0 rounded-2xl px-4 text-xs font-bold transition ${
-                          isLocked
-                            ? 'bg-parchment-variant text-ink-muted'
-                            : 'bg-midnight text-white shadow-sm hover:bg-midnight-dark active:scale-95'
-                        }`}
-                      >
-                        {status === 'approved'
-                          ? 'تم الاعتماد'
-                          : status === 'pending'
-                            ? 'تم الإرسال'
-                            : isAfterEnd
-                              ? 'انتهى التحدي'
-                              : status === 'rejected'
-                                ? 'إعادة التسجيل'
-                                : isBeforeStart
-                                  ? 'تجربة التسجيل 🧪'
-                                  : 'تسجيل الإنجاز'}
-                      </button>
-                    </div>
+                        <button
+                          type="button"
+                          disabled={isLocked}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!isLocked) openTaskSubmission(task);
+                          }}
+                          className={`h-11 shrink-0 rounded-2xl px-4 text-xs font-bold transition ${
+                            isLocked
+                              ? 'bg-parchment-variant text-ink-muted'
+                              : 'bg-midnight text-white shadow-sm hover:bg-midnight-dark active:scale-95'
+                          }`}
+                        >
+                          {status === 'approved'
+                            ? 'تم الاعتماد'
+                            : status === 'pending'
+                              ? 'تم الإرسال'
+                              : isAfterEnd
+                                ? 'انتهى التحدي'
+                                : status === 'rejected'
+                                  ? 'إعادة التسجيل'
+                                  : isBeforeStart
+                                    ? 'تجربة التسجيل 🧪'
+                                    : 'تسجيل الإنجاز'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })}

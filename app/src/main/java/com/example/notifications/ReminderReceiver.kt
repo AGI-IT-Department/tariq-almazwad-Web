@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.example.data.AppDatabase
+import com.example.data.AutoContentBank
 import com.example.data.BibleReadingPlan
 import com.example.data.FastCalendar
 import com.example.data.FastDate
@@ -89,6 +90,14 @@ class ReminderReceiver : BroadcastReceiver() {
                     pendingResult.finish()
                 }
             }
+            return
+        }
+
+        if (id == ReminderScheduler.ID_DAILY_ENCOURAGEMENT) {
+            val devotion = AutoContentBank.getTodayAutoDevotion(appContext)
+            val title = "آية اليوم • ${devotion.verseRef} ✨"
+            val message = "${devotion.verseText} — ${devotion.fatherQuote} (${devotion.fatherName})"
+            ReminderScheduler.showNotificationNow(appContext, id, title, message)
             return
         }
 

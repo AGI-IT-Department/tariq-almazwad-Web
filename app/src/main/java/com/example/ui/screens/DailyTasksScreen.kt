@@ -31,14 +31,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AccessTime
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.HourglassTop
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MenuBook
-import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Quiz
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -75,6 +77,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.R
+import com.example.data.AutoContentBank
 import com.example.data.ChallengeTask
 import com.example.data.FastCalendar
 import com.example.data.FastDate
@@ -83,22 +86,20 @@ import com.example.data.OfficialReadingPlan
 import com.example.data.SubmissionStatus
 import com.example.data.TaskFrequency
 import com.example.data.TaskSubmission
-import com.example.data.UrlValidator
-import com.example.data.WeeklyQuizQuestion
 import com.example.data.WeeklySyllabusItem
 import com.example.data.WeeklySyllabusSchedule
+import com.example.ui.components.AutoWeeklyQuizDialog
 import com.example.ui.components.DailyVerseBanner
 import com.example.ui.components.InAppBibleChapterReaderDialog
 import com.example.ui.components.InAppBookPdfReaderDialog
-import com.example.ui.components.InAppWeeklyQuizDialog
 import com.example.ui.components.StatusBadge
 import com.example.ui.components.TaskSubmissionBottomSheet
 import com.example.ui.components.formatTimeArabic
-import com.example.ui.components.openSafeExternalUrl
 import com.example.ui.components.sharePlainText
 import com.example.ui.components.taskIconForKey
 import com.example.ui.state.AppUiState
 import com.example.ui.theme.ApprovedEmerald
+import com.example.ui.theme.ApprovedEmeraldBg
 import com.example.ui.theme.BrightGold
 import com.example.ui.theme.MidnightTeal
 import com.example.ui.theme.MidnightTealDark
@@ -120,17 +121,24 @@ private data class TaskGroupSection(
     val tasks: List<ChallengeTask>
 )
 
-private data class ActiveQuizDialogState(
-    val task: ChallengeTask,
-    val questions: List<WeeklyQuizQuestion>,
-    val week: WeeklySyllabusItem,
-    val alreadySubmitted: Boolean
+private data class ActiveAutoQuizDialogState(
+    val weekNumber: Int,
+    val completedPoints: Int?,
+    val taskId: String
 )
 
 @Composable
 fun DailyTasksScreen(
     uiState: AppUiState,
     onSubmitTask: (ChallengeTask, String) -> Unit,
+    onSubmitAutoQuiz: (
+        weekNumber: Int,
+        correctCount: Int,
+        totalItems: Int,
+        earnedPoints: Int,
+        preferredTaskId: String,
+        onDone: (Boolean) -> Unit
+    ) -> Unit,
     onOpenReadingPlan: () -> Unit = {},
     onOpenMyRank: () -> Unit,
     onOpenReminders: () -> Unit,
@@ -152,24 +160,15 @@ fun DailyTasksScreen(
     var selectedFilterIdx by remember { mutableIntStateOf(0) }
     var selectedTaskForSheet by remember { mutableStateOf<ChallengeTask?>(null) }
     var sheetInitialNote by remember { mutableStateOf("") }
-    var activeQuizDialog by remember { mutableStateOf<ActiveQuizDialogState?>(null) }
+    var activeAutoQuiz by remember { mutableStateOf<ActiveAutoQuizDialogState?>(null) }
     var showBookReader by remember { mutableStateOf(false) }
     var showBibleReader by remember { mutableStateOf(false) }
 
     val activeWeek = remember(today) { WeeklySyllabusSchedule.getActiveWeek(today).activeWeek }
     val todayOfficialBible = remember(today) { WeeklySyllabusSchedule.getTodayOfficialBiblePlan(today) }
-
-    val decodedQuiz = remember(uiState.appConfig.weeklyQuizQuestion, uiState.appConfig.weeklyQuizQuestionsJson) {
-        val decoded = WeeklySyllabusSchedule.decodeQuizConfig(uiState.appConfig.weeklyQuizQuestion)
-        val cleanIntro = OfficialReadingPlan.stripMetaFromQuestion(decoded.introText)
-        val fromDedicatedJson = WeeklySyllabusSchedule.parseQuestionsJson(uiState.appConfig.weeklyQuizQuestionsJson)
-        val mergedQuestions = if (fromDedicatedJson.isNotEmpty()) fromDedicatedJson else decoded.questions
-        cleanIntro to mergedQuestions
-    }
-    val quizIntroText = decodedQuiz.first
-    val quizQuestions = decodedQuiz.second
-    val hasExternalQuizLink = remember(uiState.appConfig.weeklyQuizUrl) {
-        UrlValidator.isSafeHttpUrl(uiState.appConfig.weeklyQuizUrl)
+    val todayDevotion = remember(today) { AutoContentBank.getTodayAutoDevotion(context, today) }
+    val enabledQuizWeeks = remember(uiState.appConfig.weeklyQuizQuestion) {
+        OfficialReadingPlan.getEnabledQuizWeeks(uiState.appConfig)
     }
 
     val activeTasks = remember(uiState.allTasks) {
@@ -224,17 +223,18 @@ fun DailyTasksScreen(
         )
     }
 
-    activeQuizDialog?.let { dialogState ->
-        InAppWeeklyQuizDialog(
-            title = uiState.appConfig.weeklyQuizTitle,
-            week = dialogState.week,
-            questions = dialogState.questions,
-            alreadySubmitted = dialogState.alreadySubmitted,
-            onDismiss = { activeQuizDialog = null },
-            onSubmitQuizResult = { summary ->
-                onSubmitTask(dialogState.task, summary)
-                activeQuizDialog = null
-            }
+    activeAutoQuiz?.let { quizState ->
+        val quiz = remember(quizState.weekNumber) {
+            AutoContentBank.getAutoWeeklyQuiz(context, quizState.weekNumber)
+        }
+        AutoWeeklyQuizDialog(
+            quiz = quiz,
+            userId = user.id,
+            completedPoints = quizState.completedPoints,
+            onSubmitResult = { weekNum, correct, total, points, onDone ->
+                onSubmitAutoQuiz(weekNum, correct, total, points, quizState.taskId, onDone)
+            },
+            onDismiss = { activeAutoQuiz = null }
         )
     }
 
@@ -280,8 +280,14 @@ fun DailyTasksScreen(
         )
     }
 
-    val completedNowCount = remember(activeTasks, uiState.userSubmissions, today) {
+    val completedNowCount = remember(activeTasks, uiState.userSubmissions, today, enabledQuizWeeks, user.id) {
         activeTasks.count { task ->
+            if (task.id == "task_weekly_exam_incarnation" || task.id == "task_weekly_quiz") {
+                val solvedAnyEnabled = enabledQuizWeeks.any { w ->
+                    AutoContentBank.findUserAutoQuizSubmission(uiState.userSubmissions, user.id, w, today) != null
+                }
+                if (solvedAnyEnabled) return@count true
+            }
             val periodKey = FastCalendar.periodKeyForTask(TaskFrequency.fromKey(task.frequency), today)
             val sub = uiState.userSubmissions.firstOrNull { it.taskId == task.id && it.periodKey == periodKey }
             sub != null && (sub.status == SubmissionStatus.APPROVED.key || sub.status == SubmissionStatus.PENDING.key)
@@ -593,12 +599,12 @@ fun DailyTasksScreen(
                 }
             }
 
-            // Compact Daily Verse Banner
+            // Automatic Daily Verse + Coptic Orthodox Church Fathers Quote Banner
             item {
                 DailyVerseBanner(
-                    verseText = uiState.appConfig.dailyVerseText,
-                    reference = uiState.appConfig.dailyVerseRef,
-                    encouragement = uiState.appConfig.dailyEncouragement,
+                    verseText = todayDevotion.verseText,
+                    reference = todayDevotion.verseRef,
+                    encouragement = "«${todayDevotion.fatherQuote}» — ${todayDevotion.fatherName}",
                     onShare = { text -> sharePlainText(context, text, "مشاركة آية اليوم") }
                 )
             }
@@ -684,9 +690,6 @@ fun DailyTasksScreen(
                     val existingSub = uiState.userSubmissions.firstOrNull {
                         it.taskId == task.id && it.periodKey == periodKey
                     }
-                    val isLocked = isAfterEnd ||
-                        existingSub?.status == SubmissionStatus.PENDING.key ||
-                        existingSub?.status == SubmissionStatus.APPROVED.key
 
                     InteractiveTaskCard(
                         task = task,
@@ -700,22 +703,19 @@ fun DailyTasksScreen(
                             uiState.reminderSettings.bibleReadingHour,
                             uiState.reminderSettings.bibleReadingMinute
                         ),
-                        quizIntroText = quizIntroText,
-                        quizQuestions = quizQuestions,
-                        hasExternalQuizLink = hasExternalQuizLink,
+                        enabledQuizWeeks = enabledQuizWeeks,
+                        userId = user.id,
+                        userSubmissions = uiState.userSubmissions,
+                        today = today,
                         onOpenBibleReader = { showBibleReader = true },
                         onOpenReminders = onOpenReminders,
                         onOpenBookReader = { showBookReader = true },
-                        onStartInAppQuiz = {
-                            activeQuizDialog = ActiveQuizDialogState(
-                                task = task,
-                                questions = quizQuestions,
-                                week = activeWeek,
-                                alreadySubmitted = isLocked
+                        onOpenAutoQuiz = { weekNum, completedPts ->
+                            activeAutoQuiz = ActiveAutoQuizDialogState(
+                                weekNumber = weekNum,
+                                completedPoints = completedPts,
+                                taskId = task.id
                             )
-                        },
-                        onOpenExternalQuiz = {
-                            openSafeExternalUrl(context, uiState.appConfig.weeklyQuizUrl)
                         },
                         onSubmitClick = { openTaskSheet(task) }
                     )
@@ -762,16 +762,17 @@ private fun InteractiveTaskCard(
     activeWeek: WeeklySyllabusItem,
     todayOfficialBible: OfficialBibleDayPlan,
     bibleReminderTimeLabel: String,
-    quizIntroText: String,
-    quizQuestions: List<WeeklyQuizQuestion>,
-    hasExternalQuizLink: Boolean,
+    enabledQuizWeeks: List<Int>,
+    userId: String,
+    userSubmissions: List<TaskSubmission>,
+    today: FastDate,
     onOpenBibleReader: () -> Unit,
     onOpenReminders: () -> Unit,
     onOpenBookReader: () -> Unit,
-    onStartInAppQuiz: () -> Unit,
-    onOpenExternalQuiz: () -> Unit,
+    onOpenAutoQuiz: (weekNumber: Int, completedPoints: Int?) -> Unit,
     onSubmitClick: () -> Unit
 ) {
+    val context = LocalContext.current
     val status = existingSubmission?.let { SubmissionStatus.fromKey(it.status) }
     val isLocked = isAfterEnd || status == SubmissionStatus.PENDING || status == SubmissionStatus.APPROVED
 
@@ -820,7 +821,7 @@ private fun InteractiveTaskCard(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(22.dp))
-            .clickable(enabled = !isLocked) { onSubmitClick() }
+            .clickable(enabled = !isLocked && !isWeeklyExamTask) { onSubmitClick() }
     ) {
         Column(
             modifier = Modifier
@@ -1069,7 +1070,7 @@ private fun InteractiveTaskCard(
                 }
             }
 
-            // INLINE: Weekly Exam Syllabus + In-App Quiz / External Link
+            // INLINE: Automatic 100-Question Weekly Quizzes (Direct Auto-Grading & Credit)
             if (isWeeklyExamTask) {
                 Surface(
                     color = if (isDark) NativityBurgundy.copy(alpha = 0.2f) else NativityBurgundy.copy(alpha = 0.06f),
@@ -1079,7 +1080,7 @@ private fun InteractiveTaskCard(
                 ) {
                     Column(
                         modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -1126,71 +1127,163 @@ private fun InteractiveTaskCard(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface
                         )
-                        if (quizIntroText.isNotBlank()) {
+
+                        if (enabledQuizWeeks.isEmpty()) {
                             Surface(
                                 color = MaterialTheme.colorScheme.surface,
-                                shape = RoundedCornerShape(10.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text(
-                                    text = quizIntroText,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(8.dp)
-                                )
-                            }
-                        }
-                        if (quizQuestions.isNotEmpty() || hasExternalQuizLink) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 2.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                if (quizQuestions.isNotEmpty()) {
-                                    Button(
-                                        onClick = onStartInAppQuiz,
-                                        shape = RoundedCornerShape(12.dp),
-                                        colors = ButtonDefaults.buttonColors(containerColor = NativityBurgundy),
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .testTag("start_inline_weekly_quiz_button")
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Filled.Quiz,
-                                            contentDescription = null,
-                                            tint = BrightGold,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(
-                                            text = "ابدأ المسابقة (${quizQuestions.size} أسئلة)",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = Color.White
-                                        )
-                                    }
+                                Row(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Lock,
+                                        contentDescription = null,
+                                        tint = WarmGold,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = "لا توجد مسابقة مفعّلة حالياً — ستظهر هنا تلقائياً فور تفعيلها من خدام التحدي",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
-                                if (hasExternalQuizLink) {
-                                    OutlinedButton(
-                                        onClick = onOpenExternalQuiz,
-                                        shape = RoundedCornerShape(12.dp),
-                                        border = BorderStroke(1.dp, accentBurgundy.copy(alpha = 0.45f)),
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-                                        modifier = Modifier.testTag("open_inline_quiz_url_button")
+                            }
+                        } else {
+                            enabledQuizWeeks.forEach { weekNum ->
+                                val quiz = remember(weekNum) {
+                                    AutoContentBank.getAutoWeeklyQuiz(context, weekNum)
+                                }
+                                val solvedSub = AutoContentBank.findUserAutoQuizSubmission(
+                                    submissions = userSubmissions,
+                                    userId = userId,
+                                    weekNumber = weekNum,
+                                    today = today
+                                )
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surface,
+                                    shape = RoundedCornerShape(14.dp),
+                                    border = BorderStroke(1.dp, accentBurgundy.copy(alpha = 0.25f)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Filled.OpenInNew,
-                                            contentDescription = "فتح رابط المسابقة",
-                                            tint = accentBurgundy,
-                                            modifier = Modifier.size(15.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = quiz.titleAr,
+                                                style = MaterialTheme.typography.labelLarge,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = accentTeal,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            Surface(
+                                                color = WarmGold.copy(alpha = 0.2f),
+                                                shape = RoundedCornerShape(50)
+                                            ) {
+                                                Text(
+                                                    text = "${quiz.totalItems} سؤال • ${quiz.maxPoints} نقطة",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = accentTeal,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
                                         Text(
-                                            text = "رابط المسابقة",
+                                            text = quiz.subtitleAr,
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = accentBurgundy
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
+                                        if (solvedSub != null) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Surface(
+                                                    color = if (isDark) ApprovedEmerald.copy(alpha = 0.2f) else ApprovedEmeraldBg,
+                                                    shape = RoundedCornerShape(50)
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Filled.CheckCircle,
+                                                            contentDescription = null,
+                                                            tint = ApprovedEmerald,
+                                                            modifier = Modifier.size(14.dp)
+                                                        )
+                                                        Text(
+                                                            text = "تم الحل: ${solvedSub.points} / ${quiz.maxPoints} نقطة",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = ApprovedEmerald,
+                                                            fontWeight = FontWeight.ExtraBold
+                                                        )
+                                                    }
+                                                }
+                                                OutlinedButton(
+                                                    onClick = { onOpenAutoQuiz(weekNum, solvedSub.points) },
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    border = BorderStroke(1.dp, accentTeal.copy(alpha = 0.45f)),
+                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                                    modifier = Modifier.testTag("review_auto_quiz_w$weekNum")
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Filled.Visibility,
+                                                        contentDescription = null,
+                                                        tint = accentTeal,
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(
+                                                        text = "مراجعة الإجابات",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = accentTeal,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
+                                        } else {
+                                            Button(
+                                                onClick = { onOpenAutoQuiz(weekNum, null) },
+                                                enabled = !isAfterEnd,
+                                                shape = RoundedCornerShape(12.dp),
+                                                colors = ButtonDefaults.buttonColors(containerColor = NativityBurgundy),
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .testTag("start_auto_quiz_w$weekNum")
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Quiz,
+                                                    contentDescription = null,
+                                                    tint = BrightGold,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(
+                                                    text = if (isAfterEnd) {
+                                                        "انتهت فترة التحدي"
+                                                    } else {
+                                                        "ابدأ ${quiz.titleAr} (${quiz.totalItems} سؤال • تصحيح فوري)"
+                                                    },
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    color = Color.White
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1203,53 +1296,80 @@ private fun InteractiveTaskCard(
                 Text(
                     text = "ملاحظة الخادم: ${existingSubmission?.adminNote}",
                     style = MaterialTheme.typography.bodySmall,
-                    color = NativityBurgundy
+                    color = accentBurgundy
                 )
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (status != null) {
-                    StatusBadge(status = status)
-                } else {
-                    Text(
-                        text = when {
-                            isAfterEnd -> "انتهت فترة التحدي (5/1/2027)"
-                            isBeforeStart -> "اضغط للتجربة في الوضع التجريبي 🧪"
-                            else -> "اضغط لتسجيل إنجازك الآن"
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                Button(
-                    onClick = onSubmitClick,
-                    enabled = !isLocked,
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MidnightTeal,
-                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant
-                    ),
-                    modifier = Modifier
-                        .height(44.dp)
-                        .testTag("submit_task_${task.id}")
+            if (isWeeklyExamTask) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
-                        text = when {
-                            status == SubmissionStatus.APPROVED -> "تم الاعتماد"
-                            status == SubmissionStatus.PENDING -> "تم الإرسال"
-                            isAfterEnd -> "انتهى التحدي"
-                            status == SubmissionStatus.REJECTED -> "إعادة التسجيل"
-                            isBeforeStart -> "تجربة التسجيل 🧪"
-                            else -> "تسجيل الإنجاز"
-                        },
-                        style = MaterialTheme.typography.labelLarge,
-                        color = if (isLocked) MaterialTheme.colorScheme.onSurfaceVariant else Color.White
-                    )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.AutoAwesome,
+                            contentDescription = null,
+                            tint = WarmGold,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Text(
+                            text = "تصحيح وإضافة النقاط تلقائياً لرصيدك فور إنهاء المسابقة",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = accentTeal,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (status != null) {
+                        StatusBadge(status = status)
+                    } else {
+                        Text(
+                            text = when {
+                                isAfterEnd -> "انتهت فترة التحدي (5/1/2027)"
+                                isBeforeStart -> "اضغط للتجربة في الوضع التجريبي 🧪"
+                                else -> "اضغط لتسجيل إنجازك الآن"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Button(
+                        onClick = onSubmitClick,
+                        enabled = !isLocked,
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MidnightTeal,
+                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant
+                        ),
+                        modifier = Modifier
+                            .height(44.dp)
+                            .testTag("submit_task_${task.id}")
+                    ) {
+                        Text(
+                            text = when {
+                                status == SubmissionStatus.APPROVED -> "تم الاعتماد"
+                                status == SubmissionStatus.PENDING -> "تم الإرسال"
+                                isAfterEnd -> "انتهى التحدي"
+                                status == SubmissionStatus.REJECTED -> "إعادة التسجيل"
+                                isBeforeStart -> "تجربة التسجيل 🧪"
+                                else -> "تسجيل الإنجاز"
+                            },
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (isLocked) MaterialTheme.colorScheme.onSurfaceVariant else Color.White
+                        )
+                    }
                 }
             }
         }

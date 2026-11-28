@@ -30,6 +30,14 @@ import {
   requestBrowserNotificationPermission,
   showLocalOrSwNotification,
 } from '../lib/notifications';
+import {
+  autoQuizPeriodKey,
+  clearAutoQuizDraft,
+  findUserAutoQuizSubmission,
+  getAutoWeeklyQuiz,
+  getTodayAutoDevotion,
+  withToggledQuizWeek,
+} from '../lib/autoContent';
 
 export interface ToastMessage {
   id: number;
@@ -465,6 +473,90 @@ export function useChallengeApp() {
     [activeUser, submissions, showToast]
   );
 
+  const submitAutoQuizResult = useCallback(
+    async (
+      weekNumber: number,
+      correctCount: number,
+      totalItems: number,
+      earnedPoints: number,
+      preferredTaskId = 'task_weekly_exam_incarnation'
+    ): Promise<boolean> => {
+      if (!activeUser) return false;
+      const today = todayFastDate();
+      if (FastCalendar.isAfterEnd(today)) {
+        showToast('انتهت فترة التحدي يوم 5 يناير 2027 — تم إغلاق المسابقات');
+        return false;
+      }
+
+      const existing = findUserAutoQuizSubmission(submissions, activeUser.id, weekNumber, today);
+      if (existing) {
+        showToast(`لقد أتممت هذه المسابقة بالفعل وحصلت على ${existing.points} نقطة ✅`);
+        return false;
+      }
+
+      const isTrial = FastCalendar.isTrialMode(today);
+      const quiz = getAutoWeeklyQuiz(weekNumber);
+      const periodKey = autoQuizPeriodKey(weekNumber, today);
+      const targetTask =
+        tasks.find((t) => t.id === preferredTaskId) ??
+        tasks.find((t) => t.id === 'task_weekly_exam_incarnation') ??
+        tasks.find((t) => t.id === 'task_weekly_quiz');
+      const resolvedTaskId = targetTask?.id ?? 'task_weekly_exam_incarnation';
+      const now = Date.now();
+      const safePoints = Math.min(Math.max(Math.round(earnedPoints), 0), quiz.maxPoints);
+
+      const submission: TaskSubmission = {
+        id: generateUuid(),
+        userId: activeUser.id,
+        userName: activeUser.fullName,
+        taskId: resolvedTaskId,
+        taskTitle: `${quiz.titleAr} (${correctCount}/${totalItems})`,
+        points: safePoints,
+        periodKey,
+        submissionDate: toIsoString(today),
+        note: `تصحيح تلقائي فوري: ${correctCount} إجابة صحيحة من ${totalItems} (+${safePoints} نقطة)`,
+        status: 'approved',
+        adminNote: 'تصحيح واعتماد تلقائي فوري من نظام المسابقات',
+        submittedAt: now,
+        reviewedAt: now,
+      };
+
+      if (supabaseClient.isConfigured) {
+        try {
+          if (targetTask && ADDON_WEEKLY_TASKS.some((a) => a.id === targetTask.id)) {
+            await supabaseClient.upsertTask(targetTask).catch(() => {});
+          }
+          await supabaseClient.upsertSubmission(submission);
+        } catch (err) {
+          showToast(`تعذر حفظ نتيجة المسابقة في Supabase: ${err instanceof Error ? err.message : ''}`);
+          return false;
+        }
+      }
+
+      const nextSubs = [submission, ...submissions];
+      setSubmissions(nextSubs);
+      localStore.saveSubmissions(nextSubs);
+      clearAutoQuizDraft(activeUser.id, weekNumber);
+
+      // Update approval snapshot so the self-credited quiz doesn't double-notify on next poll
+      const prevSnap = localStore.getApprovalSnapshot(activeUser.id);
+      if (prevSnap) {
+        localStore.saveApprovalSnapshot(activeUser.id, {
+          seenApprovedIds: Array.from(new Set([...prevSnap.seenApprovedIds, submission.id])),
+          lastBonusPoints: prevSnap.lastBonusPoints,
+        });
+      }
+
+      showToast(
+        isTrial
+          ? `مبروك! نتيجتك ${safePoints}/${quiz.maxPoints} نقطة (${correctCount}/${totalItems}) وأُضيفت مباشرة لرصيدك (تجريبي 🧪)`
+          : `مبروك! نتيجتك ${safePoints}/${quiz.maxPoints} نقطة (${correctCount}/${totalItems}) وأُضيفت مباشرة لرصيدك 🎉`
+      );
+      return true;
+    },
+    [activeUser, submissions, tasks, showToast]
+  );
+
   // Admin actions
   const openAdmin = useCallback(() => setIsAdminOpen(true), []);
   const closeAdmin = useCallback(() => setIsAdminOpen(false), []);
@@ -790,6 +882,29 @@ export function useChallengeApp() {
     [showToast]
   );
 
+  const toggleQuizWeek = useCallback(
+    async (weekNumber: number, enabled: boolean) => {
+      const nextConfig = withToggledQuizWeek(appConfig, weekNumber, enabled);
+      if (supabaseClient.isConfigured) {
+        try {
+          await supabaseClient.upsertAppConfig(nextConfig);
+        } catch {
+          showToast('تعذر حفظ حالة المسابقة على Supabase');
+          return;
+        }
+      }
+      setAppConfig(nextConfig);
+      localStore.saveAppConfig(nextConfig);
+      const quiz = getAutoWeeklyQuiz(weekNumber);
+      showToast(
+        enabled
+          ? `تم تفعيل «${quiz.titleAr}» وظهورها للمشاركين الآن ✅`
+          : `تم إيقاف «${quiz.titleAr}» وإخفاؤها عن المشاركين`
+      );
+    },
+    [appConfig, showToast]
+  );
+
   const changeAdminPin = useCallback(
     async (currentPin: string, newPin: string): Promise<boolean> => {
       if (!isAdminUnlocked) {
@@ -908,17 +1023,18 @@ export function useChallengeApp() {
   }, [showToast]);
 
   const sendTestEncouragement = useCallback(async () => {
-    const title = 'تحدي طريق المزود ✨';
-    const body = `${appConfig.dailyVerseText} (${appConfig.dailyVerseRef}) — ${appConfig.dailyEncouragement}`;
+    const devotion = getTodayAutoDevotion();
+    const title = `آية اليوم • ${devotion.verseRef} ✨`;
+    const body = `${devotion.verseText} — ${devotion.fatherQuote} (${devotion.fatherName})`;
 
     await requestBrowserNotificationPermission();
     const sent = await showLocalOrSwNotification(title, body, 'tariq-test-encouragement');
     if (sent) {
-      showToast('تم إرسال إشعار تشجيعي الآن!');
+      showToast('تم إرسال إشعار آية اليوم وقول الآباء الآن!');
       return;
     }
-    showToast(`${title} ${appConfig.dailyVerseText}`);
-  }, [appConfig, showToast]);
+    showToast(`${title}: ${devotion.verseText}`);
+  }, [showToast]);
 
   const testSupabaseConnection = useCallback(async () => {
     const res = await supabaseClient.testConnection();
@@ -960,6 +1076,7 @@ export function useChallengeApp() {
     loginOrRegister,
     logoutYouth,
     submitTask,
+    submitAutoQuizResult,
     openAdmin,
     closeAdmin,
     unlockAdmin,
@@ -972,6 +1089,7 @@ export function useChallengeApp() {
     adminDeleteUser,
     updateTask,
     updateAppConfig,
+    toggleQuizWeek,
     changeAdminPin,
     exportLeaderboardCsv,
     updateReminders,

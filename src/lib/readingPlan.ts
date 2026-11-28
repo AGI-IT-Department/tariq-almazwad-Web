@@ -266,40 +266,61 @@ export function stripQuizMetaFromQuestion(rawQuestion: string): string {
 export function encodeQuestionWithMeta(
   cleanQuestion: string,
   activeWeek: number,
-  questions: QuizQuestion[]
+  questions: QuizQuestion[],
+  enabledQuizWeeks?: number[]
 ): string {
   const base = stripQuizMetaFromQuestion(cleanQuestion).trim();
-  const payload = JSON.stringify({
+  const payload: Record<string, unknown> = {
     w: Math.min(Math.max(Math.round(activeWeek || 1), 1), 5),
     q: questions,
-  });
-  return `${base}${META_START}${payload}${META_END}`;
+  };
+  if (Array.isArray(enabledQuizWeeks)) {
+    const cleanWeeks = Array.from(
+      new Set(
+        enabledQuizWeeks
+          .map((n) => Math.round(Number(n)))
+          .filter((n) => Number.isFinite(n) && n >= 1 && n <= 5)
+      )
+    ).sort((a, b) => a - b);
+    payload.ew = cleanWeeks;
+  }
+  return `${base}${META_START}${JSON.stringify(payload)}${META_END}`;
 }
 
 export function extractQuizMetaFromQuestion(rawQuestion: string): {
   cleanQuestion: string;
   activeWeek: number | null;
   questions: QuizQuestion[] | null;
+  enabledQuizWeeks: number[] | null;
 } {
   const startIdx = rawQuestion.indexOf(META_START);
   if (startIdx < 0) {
-    return { cleanQuestion: rawQuestion, activeWeek: null, questions: null };
+    return { cleanQuestion: rawQuestion, activeWeek: null, questions: null, enabledQuizWeeks: null };
   }
   const endIdx = rawQuestion.indexOf(META_END, startIdx + META_START.length);
   const cleanQuestion = rawQuestion.slice(0, startIdx).trim();
   if (endIdx < 0) {
-    return { cleanQuestion, activeWeek: null, questions: null };
+    return { cleanQuestion, activeWeek: null, questions: null, enabledQuizWeeks: null };
   }
   const jsonPart = rawQuestion.slice(startIdx + META_START.length, endIdx);
   try {
-    const parsed = JSON.parse(jsonPart) as { w?: number; q?: unknown };
+    const parsed = JSON.parse(jsonPart) as { w?: number; q?: unknown; ew?: unknown };
     const week =
       typeof parsed.w === 'number' && parsed.w >= 1 && parsed.w <= 5
         ? Math.round(parsed.w)
         : null;
     const questions = Array.isArray(parsed.q) ? sanitizeQuizQuestions(parsed.q) : null;
-    return { cleanQuestion, activeWeek: week, questions };
+    const enabledQuizWeeks = Array.isArray(parsed.ew)
+      ? Array.from(
+          new Set(
+            parsed.ew
+              .map((n) => Math.round(Number(n)))
+              .filter((n) => Number.isFinite(n) && n >= 1 && n <= 5)
+          )
+        ).sort((a, b) => a - b)
+      : null;
+    return { cleanQuestion, activeWeek: week, questions, enabledQuizWeeks };
   } catch {
-    return { cleanQuestion, activeWeek: null, questions: null };
+    return { cleanQuestion, activeWeek: null, questions: null, enabledQuizWeeks: null };
   }
 }

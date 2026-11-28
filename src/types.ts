@@ -51,6 +51,7 @@ export interface TaskSubmission {
 export interface AppConfig {
   id: number;
   activeWeek: number;
+  enabledQuizWeeks: number[];
   weeklyQuizTitle: string;
   weeklyQuizQuestion: string;
   weeklyQuizUrl: string;
@@ -114,6 +115,7 @@ export const STATUS_LABELS: Record<SubmissionStatus, string> = {
 export const DEFAULT_APP_CONFIG: AppConfig = {
   id: 1,
   activeWeek: 1,
+  enabledQuizWeeks: [1],
   weeklyQuizTitle: 'مسابقة الأسبوع الأول • بشارة الميلاد',
   weeklyQuizQuestion:
     'اقرأ أصحاح 1 و 2 من إنجيل معلمنا لوقا وشارك في المسابقة الأسبوعية للحصول على 200 نقطة!',

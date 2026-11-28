@@ -73,6 +73,7 @@ export const App: React.FC = () => {
           onAdminDeleteUser={app.adminDeleteUser}
           onUpdateTask={app.updateTask}
           onUpdateConfig={app.updateAppConfig}
+          onToggleQuizWeek={app.toggleQuizWeek}
           onExportCsv={app.exportLeaderboardCsv}
           onChangeAdminPin={app.changeAdminPin}
           onFeedback={app.showToast}
@@ -108,6 +109,7 @@ export const App: React.FC = () => {
                 appConfig={app.appConfig}
                 reminderSettings={app.reminderSettings}
                 onSubmitTask={app.submitTask}
+                onSubmitAutoQuiz={app.submitAutoQuizResult}
                 onOpenReadingPlan={() => app.setSelectedTab('plan')}
                 onOpenMyRank={() => app.setSelectedTab('my_rank')}
                 onOpenReminders={() => setShowReminders(true)}
@@ -117,10 +119,12 @@ export const App: React.FC = () => {
             )}
             {app.selectedTab === 'plan' && (
               <ReadingPlanScreen
+                userId={app.activeUser.id}
                 allTasks={app.allTasks}
                 userSubmissions={app.userSubmissions}
                 appConfig={app.appConfig}
                 onSubmitTask={app.submitTask}
+                onSubmitAutoQuiz={app.submitAutoQuizResult}
               />
             )}
             {app.selectedTab === 'my_log' && (

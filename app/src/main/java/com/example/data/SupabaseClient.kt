@@ -328,11 +328,20 @@ class SupabaseClient {
                 val colQJson = o.optString("weekly_quiz_questions_json", "").takeIf { it.isNotBlank() && it != "[]" }
                 val finalQJson = colQJson ?: meta.questionsJson ?: "[]"
 
+                val resolvedWeek = colWeek ?: meta.activeWeek ?: 1
+                val resolvedEnabledWeeks = meta.enabledQuizWeeks ?: AutoContentBank.DEFAULT_ENABLED_QUIZ_WEEKS
+                val storedQuestionWithMeta = OfficialReadingPlan.encodeQuestionWithMeta(
+                    cleanQuestion = meta.cleanQuestion,
+                    activeWeek = resolvedWeek,
+                    questionsJson = finalQJson,
+                    enabledQuizWeeks = resolvedEnabledWeeks
+                )
+
                 AppConfigEntity(
                     id = 1,
-                    activeWeek = colWeek ?: meta.activeWeek ?: 1,
+                    activeWeek = resolvedWeek,
                     weeklyQuizTitle = o.optString("weekly_quiz_title", ""),
-                    weeklyQuizQuestion = meta.cleanQuestion,
+                    weeklyQuizQuestion = storedQuestionWithMeta,
                     weeklyQuizUrl = o.optString("weekly_quiz_url", ""),
                     weeklyQuizQuestionsJson = finalQJson,
                     dailyVerseText = o.optString("daily_verse_text", ""),
@@ -346,11 +355,18 @@ class SupabaseClient {
     suspend fun upsertAppConfig(config: AppConfigEntity): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             val cleanQuestion = OfficialReadingPlan.stripMetaFromQuestion(config.weeklyQuizQuestion)
+            val enabledWeeks = OfficialReadingPlan.getEnabledQuizWeeks(config)
+            val encodedQuestion = OfficialReadingPlan.encodeQuestionWithMeta(
+                cleanQuestion = cleanQuestion,
+                activeWeek = config.activeWeek,
+                questionsJson = config.weeklyQuizQuestionsJson,
+                enabledQuizWeeks = enabledWeeks
+            )
             val fullPayload = JSONObject().apply {
                 put("id", 1)
                 put("active_week", config.activeWeek.coerceIn(1, 5))
                 put("weekly_quiz_title", config.weeklyQuizTitle)
-                put("weekly_quiz_question", cleanQuestion)
+                put("weekly_quiz_question", encodedQuestion)
                 put("weekly_quiz_url", config.weeklyQuizUrl)
                 put("weekly_quiz_questions_json", config.weeklyQuizQuestionsJson.ifBlank { "[]" })
                 put("daily_verse_text", config.dailyVerseText)
@@ -374,11 +390,6 @@ class SupabaseClient {
                 }
             }
             if (needsFallback) {
-                val encodedQuestion = OfficialReadingPlan.encodeQuestionWithMeta(
-                    cleanQuestion = cleanQuestion,
-                    activeWeek = config.activeWeek,
-                    questionsJson = config.weeklyQuizQuestionsJson
-                )
                 val fallbackPayload = JSONObject().apply {
                     put("id", 1)
                     put("weekly_quiz_title", config.weeklyQuizTitle)

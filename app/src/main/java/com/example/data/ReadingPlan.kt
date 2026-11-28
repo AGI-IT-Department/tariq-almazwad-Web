@@ -246,13 +246,21 @@ object OfficialReadingPlan {
     fun encodeQuestionWithMeta(
         cleanQuestion: String,
         activeWeek: Int,
-        questionsJson: String
+        questionsJson: String,
+        enabledQuizWeeks: List<Int>? = null
     ): String {
         val base = stripMetaFromQuestion(cleanQuestion).trim()
         val questions = parseQuizQuestionsJson(questionsJson)
         val payload = JSONObject().apply {
             put("w", activeWeek.coerceIn(1, 5))
             put("q", JSONArray(serializeQuizQuestionsJson(questions)))
+            if (enabledQuizWeeks != null) {
+                val cleanWeeks = enabledQuizWeeks
+                    .map { it.coerceIn(1, 5) }
+                    .distinct()
+                    .sorted()
+                put("ew", JSONArray(cleanWeeks))
+            }
         }
         return "$base$META_START$payload$META_END"
     }
@@ -260,22 +268,62 @@ object OfficialReadingPlan {
     data class ExtractedQuizMeta(
         val cleanQuestion: String,
         val activeWeek: Int?,
-        val questionsJson: String?
+        val questionsJson: String?,
+        val enabledQuizWeeks: List<Int>?
     )
 
     fun extractMetaFromQuestion(rawQuestion: String): ExtractedQuizMeta {
         val startIdx = rawQuestion.indexOf(META_START)
-        if (startIdx < 0) return ExtractedQuizMeta(rawQuestion, null, null)
+        if (startIdx < 0) return ExtractedQuizMeta(rawQuestion, null, null, null)
         val clean = rawQuestion.substring(0, startIdx).trim()
         val endIdx = rawQuestion.indexOf(META_END, startIdx + META_START.length)
-        if (endIdx < 0) return ExtractedQuizMeta(clean, null, null)
+        if (endIdx < 0) return ExtractedQuizMeta(clean, null, null, null)
         val jsonPart = rawQuestion.substring(startIdx + META_START.length, endIdx)
         return runCatching {
             val obj = JSONObject(jsonPart)
             val w = if (obj.has("w")) obj.optInt("w", 1).coerceIn(1, 5) else null
             val qArr = obj.optJSONArray("q")
             val qJson = if (qArr != null) serializeQuizQuestionsJson(parseQuizQuestionsArray(qArr)) else null
-            ExtractedQuizMeta(clean, w, qJson)
-        }.getOrDefault(ExtractedQuizMeta(clean, null, null))
+            val ewArr = obj.optJSONArray("ew")
+            val ewList = if (ewArr != null) {
+                buildList {
+                    for (i in 0 until ewArr.length()) {
+                        val wk = ewArr.optInt(i, -1)
+                        if (wk in 1..5) add(wk)
+                    }
+                }.distinct().sorted()
+            } else {
+                null
+            }
+            ExtractedQuizMeta(clean, w, qJson, ewList)
+        }.getOrDefault(ExtractedQuizMeta(clean, null, null, null))
+    }
+
+    fun getEnabledQuizWeeks(config: AppConfigEntity): List<Int> {
+        val meta = extractMetaFromQuestion(config.weeklyQuizQuestion)
+        return meta.enabledQuizWeeks ?: AutoContentBank.DEFAULT_ENABLED_QUIZ_WEEKS
+    }
+
+    fun withToggledQuizWeek(
+        config: AppConfigEntity,
+        weekNumber: Int,
+        enabled: Boolean
+    ): AppConfigEntity {
+        val safeWeek = weekNumber.coerceIn(1, 5)
+        val current = getEnabledQuizWeeks(config).toMutableSet()
+        if (enabled) current.add(safeWeek) else current.remove(safeWeek)
+        val nextWeeks = current.sorted()
+        val nextActiveWeek = if (enabled) safeWeek else (nextWeeks.lastOrNull() ?: config.activeWeek)
+        val cleanQ = stripMetaFromQuestion(config.weeklyQuizQuestion)
+        val encoded = encodeQuestionWithMeta(
+            cleanQuestion = cleanQ,
+            activeWeek = nextActiveWeek,
+            questionsJson = config.weeklyQuizQuestionsJson,
+            enabledQuizWeeks = nextWeeks
+        )
+        return config.copy(
+            activeWeek = nextActiveWeek,
+            weeklyQuizQuestion = encoded
+        )
     }
 }

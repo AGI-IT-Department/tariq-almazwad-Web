@@ -1,17 +1,21 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   ArrowRight,
-  Award,
+  BookOpen,
   CheckCheck,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Download,
   Edit3,
+  Eye,
   Gift,
   Lock,
   MessageCircle,
   PlusCircle,
   Search,
   ShieldCheck,
+  Sparkles,
   Trash2,
   UserPlus,
   X,
@@ -27,11 +31,12 @@ import {
 import { FastCalendar, formatTimestampArabic } from '../lib/fastCalendar';
 import { openWhatsAppChat } from '../lib/securityAndExport';
 import {
-  decodeQuizConfig,
-  encodeQuizConfig,
-  getActiveSyllabusWeek,
-  type WeeklyQuizQuestion,
-} from '../lib/weeklySyllabus';
+  type AutoWeeklyQuiz,
+  getAllAutoWeeklyQuizzes,
+  getEnabledQuizWeeks,
+  getTodayAutoDevotion,
+} from '../lib/autoContent';
+import { AutoWeeklyQuizModal } from '../components/AutoWeeklyQuizModal';
 
 interface AdminDashboardScreenProps {
   isUnlocked: boolean;
@@ -52,6 +57,7 @@ interface AdminDashboardScreenProps {
   onAdminDeleteUser: (userId: string) => void;
   onUpdateTask: (task: ChallengeTask) => void;
   onUpdateConfig: (config: AppConfig) => void;
+  onToggleQuizWeek: (weekNumber: number, enabled: boolean) => void;
   onExportCsv: () => void;
   onChangeAdminPin: (currentPin: string, newPin: string) => Promise<boolean>;
   onFeedback: (msg: string) => void;
@@ -75,7 +81,7 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
   onAdminUpdateUser,
   onAdminDeleteUser,
   onUpdateTask,
-  onUpdateConfig,
+  onToggleQuizWeek,
   onExportCsv,
   onChangeAdminPin,
   onFeedback,
@@ -184,7 +190,7 @@ export const AdminDashboardScreen: React.FC<AdminDashboardScreenProps> = ({
             config={appConfig}
             onToggleTask={(task, active) => onUpdateTask({ ...task, isActive: active })}
             onEditTask={(task) => setEditingTask(task)}
-            onSaveConfig={onUpdateConfig}
+            onToggleQuizWeek={onToggleQuizWeek}
           />
         )}
         {selectedTab === 3 && (
@@ -433,6 +439,8 @@ const LeaderboardUsersTab: React.FC<{
   onNoPhoneFeedback,
 }) => {
   const [query, setQuery] = useState('');
+  const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return entries;
@@ -442,20 +450,20 @@ const LeaderboardUsersTab: React.FC<{
   }, [entries, query]);
 
   return (
-    <div className="space-y-3">
-      <div className="space-y-2.5 rounded-[20px] bg-midnight p-4 text-white shadow-sm">
+    <div className="space-y-2.5">
+      <div className="space-y-2 rounded-[18px] bg-midnight p-3.5 text-white shadow-sm">
         <h2 className="text-base font-bold text-gold-bright">
           لوحة الأبطال الحصرية وإدارة الشباب 🏆
         </h2>
         <p className="text-xs leading-relaxed text-white/90">
           {FastCalendar.isTrialMode()
-            ? 'الوضع التجريبي مفعل حالياً 🧪 • تبدأ النتائج الرسمية تلقائياً من الصفر يوم 30/11/2026 حتى 5/1/2027.'
-            : 'الترتيب الرسمي الحصري للأدمن فقط (30/11/2026 — 5/1/2027) • يمكنك إدارة أي مشارك أو مراسلته واتساب مباشرة.'}
+            ? 'الوضع التجريبي مفعل حالياً 🧪 • اضغط على أي اسم لفتح التفاصيل والإجراءات.'
+            : 'الترتيب الرسمي الحصري (30/11/2026 — 5/1/2027) • اضغط على أي اسم لفتح التفاصيل.'}
         </p>
         <button
           type="button"
           onClick={onAddUserClick}
-          className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gold-warm text-sm font-bold text-midnight-dark transition hover:bg-gold-bright active:scale-[0.99]"
+          className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gold-warm text-sm font-bold text-midnight-dark transition hover:bg-gold-bright active:scale-[0.99]"
         >
           <UserPlus className="h-4 w-4" />
           <span>إضافة مشارك جديد +</span>
@@ -469,7 +477,7 @@ const LeaderboardUsersTab: React.FC<{
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="بحث بالاسم أو رقم الموبايل..."
-          className="h-12 w-full rounded-xl border border-parchment-outline bg-white pr-10 pl-3.5 text-sm outline-none focus:border-midnight"
+          className="h-11 w-full rounded-xl border border-parchment-outline bg-white pr-10 pl-3.5 text-sm outline-none focus:border-midnight"
         />
       </div>
 
@@ -478,347 +486,291 @@ const LeaderboardUsersTab: React.FC<{
           لا يوجد مشاركون مطابقون للبحث.
         </div>
       ) : (
-        filtered.map((entry) => {
-          const isTop10 = entry.rank >= 1 && entry.rank <= FastCalendar.TOP_PRIZE_RANKS;
-          const medalBg =
-            entry.rank === 1
-              ? 'bg-medal-gold'
-              : entry.rank === 2
-                ? 'bg-medal-silver'
-                : entry.rank === 3
-                  ? 'bg-medal-bronze'
-                  : isTop10
-                    ? 'bg-midnight'
-                    : 'bg-parchment-outline';
-          const borderClass =
-            entry.rank === 1
-              ? 'border-medal-gold'
-              : entry.rank === 2
-                ? 'border-medal-silver'
-                : entry.rank === 3
-                  ? 'border-medal-bronze'
-                  : 'border-parchment-border';
+        <div className="space-y-2">
+          {filtered.map((entry) => {
+            const isTop10 = entry.rank >= 1 && entry.rank <= FastCalendar.TOP_PRIZE_RANKS;
+            const isExpanded = expandedUserId === entry.user.id;
+            const medalBg =
+              entry.rank === 1
+                ? 'bg-medal-gold'
+                : entry.rank === 2
+                  ? 'bg-medal-silver'
+                  : entry.rank === 3
+                    ? 'bg-medal-bronze'
+                    : isTop10
+                      ? 'bg-midnight'
+                      : 'bg-parchment-outline';
+            const borderClass = isExpanded
+              ? 'border-gold-warm shadow-sm'
+              : entry.rank === 1
+                ? 'border-medal-gold'
+                : entry.rank === 2
+                  ? 'border-medal-silver'
+                  : entry.rank === 3
+                    ? 'border-medal-bronze'
+                    : 'border-parchment-border';
 
-          return (
-            <div
-              key={entry.user.id}
-              className={`space-y-3 rounded-[20px] border bg-white p-3.5 shadow-xs ${borderClass}`}
-            >
-              <div className="flex items-center gap-3">
-                <div
-                  className={`flex h-11 w-11 shrink-0 flex-col items-center justify-center rounded-full text-white ${medalBg}`}
+            return (
+              <div
+                key={entry.user.id}
+                className={`overflow-hidden rounded-[16px] border bg-white transition ${borderClass}`}
+              >
+                {/* Compact Single-Line Summary Row */}
+                <button
+                  type="button"
+                  onClick={() => setExpandedUserId(isExpanded ? null : entry.user.id)}
+                  className="flex w-full items-center gap-2.5 px-3 py-2.5 text-right transition hover:bg-parchment/40"
                 >
-                  {entry.rank <= 3 && <Award className="h-3.5 w-3.5" />}
-                  <span className="text-xs font-extrabold leading-none">#{entry.rank}</span>
-                </div>
+                  <div
+                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-extrabold text-white ${medalBg}`}
+                  >
+                    #{entry.rank}
+                  </div>
 
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-bold text-ink-deep">{entry.user.fullName}</p>
-                  <p className="text-xs text-ink-muted">
-                    {entry.user.phone.trim() ? `📱 ${entry.user.phone}` : 'بدون رقم واتساب'}
-                  </p>
-                  {isTop10 && entry.totalApprovedPoints > 0 && (
-                    <span className="mt-0.5 inline-flex items-center gap-1 text-[11px] font-bold text-burgundy">
-                      <Gift className="h-3 w-3" />
-                      <span>مؤهل للجائزة 🎁</span>
-                    </span>
-                  )}
-                </div>
+                  <span className="min-w-0 flex-1 truncate text-sm font-bold text-ink-deep">
+                    {entry.user.fullName}
+                  </span>
 
-                <div className="text-left">
-                  <span className="inline-block rounded-lg bg-gold-warm/20 px-2.5 py-1 text-xs font-bold text-midnight">
+                  <span className="shrink-0 rounded-lg bg-gold-warm/20 px-2.5 py-1 text-xs font-bold text-midnight">
                     {entry.totalApprovedPoints} نقطة
                   </span>
-                  <p className="mt-0.5 text-[10px] text-ink-muted">
-                    بونص: {entry.user.bonusPoints} | معلق: {entry.pendingPoints}
-                  </p>
-                </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!entry.user.phone.trim()) {
-                      onNoPhoneFeedback();
-                    } else {
-                      openWhatsAppChat(
-                        entry.user.phone,
-                        `سلام ونعمة يا ${entry.user.fullName} ✨\nربنا يبارك جهادك في تحدي طريق المزود (مركزك الحالي #${entry.rank} برصيد ${entry.totalApprovedPoints} نقطة) — اجتماع أبو سيفين للشباب الخريجين`
-                      );
-                    }
-                  }}
-                  className="flex h-11 items-center justify-center gap-1.5 rounded-xl bg-whatsapp text-xs font-bold text-white transition hover:opacity-95"
-                >
-                  <MessageCircle className="h-4 w-4" />
-                  <span>واتساب مباشر</span>
+                  {isExpanded ? (
+                    <ChevronUp className="h-4 w-4 shrink-0 text-ink-muted" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4 shrink-0 text-ink-muted" />
+                  )}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => onBonusClick(entry)}
-                  className="flex h-11 items-center justify-center gap-1.5 rounded-xl bg-midnight text-xs font-bold text-white transition hover:bg-midnight-dark"
-                >
-                  <PlusCircle className="h-4 w-4" />
-                  <span>إضافة / خصم</span>
-                </button>
-              </div>
 
-              <div className="grid grid-cols-[1fr_auto] gap-2">
-                <button
-                  type="button"
-                  onClick={() => onEditUserClick(entry)}
-                  className="flex h-11 items-center justify-center gap-1.5 rounded-xl border border-parchment-outline text-xs font-bold text-midnight hover:bg-parchment-variant"
-                >
-                  <Edit3 className="h-4 w-4" />
-                  <span>تعديل البيانات / PIN</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onDeleteUserClick(entry)}
-                  className="flex h-11 items-center justify-center gap-1.5 rounded-xl border border-status-rejected/70 px-4 text-xs font-bold text-status-rejected hover:bg-status-rejectedBg"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  <span>حذف</span>
-                </button>
+                {/* Expandable Details & Actions */}
+                {isExpanded && (
+                  <div className="space-y-2.5 border-t border-parchment-border bg-parchment/30 px-3 pt-2.5 pb-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-medium text-ink-deep">
+                          {entry.user.phone.trim() ? `📱 ${entry.user.phone}` : 'بدون رقم واتساب'}
+                        </p>
+                        <p className="mt-0.5 text-[11px] text-ink-muted">
+                          بونص: {entry.user.bonusPoints} • معلق: {entry.pendingPoints} • مهام معتمدة:{' '}
+                          {entry.approvedTasksCount}
+                        </p>
+                      </div>
+                      {isTop10 && entry.totalApprovedPoints > 0 && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-burgundy/10 px-2.5 py-1 text-[11px] font-bold text-burgundy">
+                          <Gift className="h-3 w-3" />
+                          <span>مؤهل للجائزة</span>
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!entry.user.phone.trim()) {
+                            onNoPhoneFeedback();
+                          } else {
+                            openWhatsAppChat(
+                              entry.user.phone,
+                              `سلام ونعمة يا ${entry.user.fullName} ✨\nربنا يبارك جهادك في تحدي طريق المزود (مركزك الحالي #${entry.rank} برصيد ${entry.totalApprovedPoints} نقطة) — اجتماع أبو سيفين للشباب الخريجين`
+                            );
+                          }
+                        }}
+                        className="flex h-11 items-center justify-center gap-1.5 rounded-xl bg-whatsapp text-xs font-bold text-white transition hover:opacity-95"
+                      >
+                        <MessageCircle className="h-4 w-4" />
+                        <span>واتساب مباشر</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onBonusClick(entry)}
+                        className="flex h-11 items-center justify-center gap-1.5 rounded-xl bg-midnight text-xs font-bold text-white transition hover:bg-midnight-dark"
+                      >
+                        <PlusCircle className="h-4 w-4" />
+                        <span>إضافة / خصم</span>
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-[1fr_auto] gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onEditUserClick(entry)}
+                        className="flex h-11 items-center justify-center gap-1.5 rounded-xl border border-parchment-outline bg-white text-xs font-bold text-midnight hover:bg-parchment-variant"
+                      >
+                        <Edit3 className="h-4 w-4" />
+                        <span>تعديل البيانات / PIN</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDeleteUserClick(entry)}
+                        className="flex h-11 items-center justify-center gap-1.5 rounded-xl border border-status-rejected/70 bg-white px-4 text-xs font-bold text-status-rejected hover:bg-status-rejectedBg"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        <span>حذف</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
-          );
-        })
+            );
+          })}
+        </div>
       )}
     </div>
   );
 };
 
-/* ---------------- Tab 2: Tasks & Weekly Quiz ---------------- */
+/* ---------------- Tab 2: Automatic Weekly Quizzes, Daily Verse & Tasks ---------------- */
 const TasksAndQuizTab: React.FC<{
   tasks: ChallengeTask[];
   config: AppConfig;
   onToggleTask: (task: ChallengeTask, active: boolean) => void;
   onEditTask: (task: ChallengeTask) => void;
-  onSaveConfig: (config: AppConfig) => void;
-}> = ({ tasks, config, onToggleTask, onEditTask, onSaveConfig }) => {
-  const decodedInitial = useMemo(
-    () => decodeQuizConfig(config.weeklyQuizQuestion),
-    [config.weeklyQuizQuestion]
-  );
-
-  const [quizTitle, setQuizTitle] = useState(config.weeklyQuizTitle);
-  const [quizIntro, setQuizIntro] = useState(decodedInitial.introText);
-  const [quizQuestions, setQuizQuestions] = useState<WeeklyQuizQuestion[]>(
-    config.weeklyQuizQuestions && config.weeklyQuizQuestions.length > 0
-      ? config.weeklyQuizQuestions
-      : decodedInitial.questions
-  );
-  const [quizUrl, setQuizUrl] = useState(config.weeklyQuizUrl);
-  const [verseText, setVerseText] = useState(config.dailyVerseText);
-  const [verseRef, setVerseRef] = useState(config.dailyVerseRef);
-  const [encouragement, setEncouragement] = useState(config.dailyEncouragement);
-
-  useEffect(() => {
-    const decoded = decodeQuizConfig(config.weeklyQuizQuestion);
-    setQuizTitle(config.weeklyQuizTitle);
-    setQuizIntro(decoded.introText);
-    setQuizQuestions(
-      config.weeklyQuizQuestions && config.weeklyQuizQuestions.length > 0
-        ? config.weeklyQuizQuestions
-        : decoded.questions
-    );
-    setQuizUrl(config.weeklyQuizUrl);
-    setVerseText(config.dailyVerseText);
-    setVerseRef(config.dailyVerseRef);
-    setEncouragement(config.dailyEncouragement);
-  }, [config]);
-
-  const addQuestion = (type: 'mcq' | 'tf') => {
-    setQuizQuestions((prev) => [
-      ...prev,
-      {
-        id: `q_${Date.now()}_${prev.length + 1}`,
-        type,
-        prompt: '',
-        options: type === 'tf' ? ['صح', 'خطأ'] : ['', '', '', ''],
-        correctIndex: 0,
-      },
-    ]);
-  };
-
-  const updateQuestionPrompt = (idx: number, prompt: string) => {
-    setQuizQuestions((prev) => prev.map((q, i) => (i === idx ? { ...q, prompt } : q)));
-  };
-
-  const updateQuestionOption = (qIdx: number, optIdx: number, value: string) => {
-    setQuizQuestions((prev) =>
-      prev.map((q, i) => {
-        if (i !== qIdx) return q;
-        const nextOpts = [...q.options];
-        nextOpts[optIdx] = value;
-        return { ...q, options: nextOpts };
-      })
-    );
-  };
-
-  const updateQuestionCorrect = (qIdx: number, correctIndex: number) => {
-    setQuizQuestions((prev) =>
-      prev.map((q, i) => (i === qIdx ? { ...q, correctIndex } : q))
-    );
-  };
-
-  const removeQuestion = (qIdx: number) => {
-    setQuizQuestions((prev) => prev.filter((_, i) => i !== qIdx));
-  };
-
-  const autofillActiveWeek = () => {
-    const { activeWeek } = getActiveSyllabusWeek();
-    setQuizTitle(`المسابقة الأسبوعية • ${activeWeek.titleAr} (${activeWeek.examDateAr})`);
-    setQuizIntro(
-      `تشمل مسابقة ${activeWeek.titleAr} قراءة ${activeWeek.bibleRangeAr} + كتاب "في تجسد الكلمة": ${activeWeek.incarnationBookAr}. أجب لتحصل على 200 نقطة!`
-    );
-  };
+  onToggleQuizWeek: (weekNumber: number, enabled: boolean) => void;
+}> = ({ tasks, config, onToggleTask, onEditTask, onToggleQuizWeek }) => {
+  const allQuizzes = useMemo(() => getAllAutoWeeklyQuizzes(), []);
+  const enabledWeeks = useMemo(() => getEnabledQuizWeeks(config), [config]);
+  const todayDevotion = useMemo(() => getTodayAutoDevotion(), []);
+  const [previewQuiz, setPreviewQuiz] = useState<AutoWeeklyQuiz | null>(null);
 
   return (
     <div className="space-y-4">
-      <div className="space-y-3 rounded-[20px] border border-gold-warm/50 bg-white p-4 shadow-xs">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-base font-bold text-midnight">المسابقة الأسبوعية وآية اليوم</h3>
-          <button
-            type="button"
-            onClick={autofillActiveWeek}
-            className="rounded-xl border border-gold-warm/60 bg-status-pendingBg px-3 py-1.5 text-[11px] font-bold text-midnight transition hover:bg-gold-warm/25"
-          >
-            تعبئة منهج الأسبوع الحالي ✨
-          </button>
-        </div>
-
-        <Field label="عنوان المسابقة الأسبوعية" value={quizTitle} onChange={setQuizTitle} />
-        <TextAreaField
-          label="وصف أو تعليمات المسابقة الأسبوعية"
-          value={quizIntro}
-          onChange={setQuizIntro}
-          rows={2}
+      {previewQuiz && (
+        <AutoWeeklyQuizModal
+          quiz={previewQuiz}
+          userId="admin_preview"
+          adminPreview
+          onClose={() => setPreviewQuiz(null)}
         />
-        <Field
-          label="رابط مسابقة خارجي اختياري (Google Form - يبدأ بـ https://)"
-          value={quizUrl}
-          onChange={setQuizUrl}
-          dir="ltr"
-        />
+      )}
 
-        {/* In-App Interactive MCQ / True-False Quiz Builder */}
-        <div className="space-y-2.5 rounded-2xl border border-burgundy/25 bg-burgundy/5 p-3.5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h4 className="text-xs font-extrabold text-burgundy">
-                أسئلة المسابقة التفاعلية داخل التطبيق ({quizQuestions.length})
-              </h4>
-              <p className="text-[11px] text-ink-muted">
-                أضف أسئلة اختيار من متعدد أو صح وخطأ لتظهر للشباب مباشرة داخل التطبيق (اختياري)
-              </p>
+      {/* Automatic Weekly Quizzes Control Panel */}
+      <div className="space-y-3 rounded-[22px] border border-gold-warm/60 bg-white p-4 shadow-xs">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <div className="flex items-center gap-1.5">
+              <Sparkles className="h-4 w-4 text-gold-warm" />
+              <h3 className="text-base font-extrabold text-midnight">
+                المسابقات الأسبوعية الأوتوماتيكية
+              </h3>
             </div>
-            <div className="flex flex-wrap gap-1.5">
-              <button
-                type="button"
-                onClick={() => addQuestion('mcq')}
-                className="inline-flex items-center gap-1 rounded-xl bg-burgundy px-2.5 py-1.5 text-[11px] font-bold text-white shadow-xs hover:opacity-95"
-              >
-                <PlusCircle className="h-3.5 w-3.5" />
-                <span>+ اختيار من متعدد</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => addQuestion('tf')}
-                className="inline-flex items-center gap-1 rounded-xl bg-midnight px-2.5 py-1.5 text-[11px] font-bold text-white shadow-xs hover:bg-midnight-dark"
-              >
-                <PlusCircle className="h-3.5 w-3.5" />
-                <span>+ صح وخطأ</span>
-              </button>
-            </div>
+            <p className="mt-1 text-xs leading-relaxed text-ink-muted">
+              جميع المسابقات جاهزة تلقائياً (100 سؤال لكل أسبوع: 40 اختيار من متعدد + 40 صح وخطأ + 20 توصيل × 2 نقطة = 200 نقطة). فعّل مسابقة أي أسبوع لتظهر فوراً للشباب وتُصحّح وتُضاف لرصيدهم مباشرة.
+            </p>
           </div>
-
-          {quizQuestions.map((q, qIdx) => (
-            <div
-              key={q.id}
-              className="space-y-2 rounded-2xl border border-parchment-border bg-white p-3"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="rounded-full bg-midnight/10 px-2.5 py-0.5 text-[11px] font-bold text-midnight">
-                  سؤال {qIdx + 1} • {q.type === 'tf' ? 'صح وخطأ' : 'اختيار من متعدد'}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => removeQuestion(qIdx)}
-                  className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold text-status-rejected hover:bg-status-rejectedBg"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  <span>حذف</span>
-                </button>
-              </div>
-
-              <input
-                type="text"
-                value={q.prompt}
-                onChange={(e) => updateQuestionPrompt(qIdx, e.target.value)}
-                placeholder="اكتب نص السؤال هنا..."
-                className="h-10 w-full rounded-xl border border-parchment-outline bg-parchment/30 px-3 text-xs font-semibold text-ink-deep outline-none focus:border-midnight focus:bg-white"
-              />
-
-              <div className="space-y-1.5">
-                <p className="text-[10px] font-bold text-ink-muted">
-                  اختر الدائرة بجانب الإجابة الصحيحة:
-                </p>
-                {q.options.map((opt, optIdx) => (
-                  <div key={optIdx} className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      name={`correct_${q.id}`}
-                      checked={q.correctIndex === optIdx}
-                      onChange={() => updateQuestionCorrect(qIdx, optIdx)}
-                      className="h-4 w-4 accent-midnight"
-                    />
-                    {q.type === 'tf' ? (
-                      <span className="text-xs font-bold text-ink-deep">{opt}</span>
-                    ) : (
-                      <input
-                        type="text"
-                        value={opt}
-                        onChange={(e) => updateQuestionOption(qIdx, optIdx, e.target.value)}
-                        placeholder={`الاختيار ${optIdx + 1}`}
-                        className="h-9 flex-1 rounded-lg border border-parchment-outline bg-parchment/20 px-2.5 text-xs text-ink-deep outline-none focus:border-midnight focus:bg-white"
-                      />
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
+          <span className="shrink-0 rounded-full bg-midnight/10 px-2.5 py-1 text-[11px] font-extrabold text-midnight">
+            مفعّل: {enabledWeeks.length} / {allQuizzes.length}
+          </span>
         </div>
 
-        <TextAreaField label="آية اليوم" value={verseText} onChange={setVerseText} rows={2} />
-        <Field label="الشاهد الكتابي" value={verseRef} onChange={setVerseRef} />
-        <TextAreaField
-          label="رسالة تشجيعية يومية"
-          value={encouragement}
-          onChange={setEncouragement}
-          rows={2}
-        />
-        <button
-          type="button"
-          onClick={() =>
-            onSaveConfig({
-              id: 1,
-              activeWeek: config.activeWeek || getActiveSyllabusWeek().activeWeek.weekNumber,
-              weeklyQuizTitle: quizTitle.trim(),
-              weeklyQuizQuestion: encodeQuizConfig(quizIntro, quizQuestions),
-              weeklyQuizUrl: quizUrl.trim(),
-              weeklyQuizQuestions: quizQuestions.filter((q) => q.prompt.trim().length > 0),
-              dailyVerseText: verseText.trim(),
-              dailyVerseRef: verseRef.trim(),
-              dailyEncouragement: encouragement.trim(),
-            })
-          }
-          className="h-12 w-full rounded-xl bg-midnight text-sm font-bold text-white shadow hover:bg-midnight-dark"
-        >
-          نشر المسابقة والآية للشباب
-        </button>
+        <div className="space-y-2.5">
+          {allQuizzes.map((quiz) => {
+            const isEnabled = enabledWeeks.includes(quiz.weekNumber);
+            const matchItemsCount = quiz.match.reduce((acc, g) => acc + g.pairs.length, 0);
+            return (
+              <div
+                key={quiz.weekNumber}
+                className={`rounded-2xl border p-3.5 transition ${
+                  isEnabled
+                    ? 'border-status-approved/60 bg-status-approvedBg/35'
+                    : 'border-parchment-border bg-parchment/35'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-sm font-extrabold text-midnight">{quiz.titleAr}</span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                          isEnabled
+                            ? 'bg-status-approved text-white'
+                            : 'bg-parchment-variant text-ink-muted'
+                        }`}
+                      >
+                        {isEnabled ? 'مفعّلة للمشاركين ✓' : 'موقوفة'}
+                      </span>
+                    </div>
+                    <p className="text-xs font-medium text-ink-deep">{quiz.subtitleAr}</p>
+                    <p className="text-[11px] text-ink-muted">
+                      {quiz.mcq.length} اختيار • {quiz.tf.length} صح وخطأ • {matchItemsCount} توصيل ={' '}
+                      <span className="font-bold text-burgundy">
+                        {quiz.totalItems} سؤال ({quiz.maxPoints} نقطة)
+                      </span>
+                    </p>
+                  </div>
+
+                  {/* ON/OFF Toggle Switch */}
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={isEnabled}
+                    aria-label={`تفعيل أو إيقاف ${quiz.titleAr}`}
+                    onClick={() => onToggleQuizWeek(quiz.weekNumber, !isEnabled)}
+                    className={`relative mt-0.5 inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors ${
+                      isEnabled ? 'bg-status-approved' : 'bg-parchment-outline'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                        isEnabled ? '-translate-x-6' : '-translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-parchment-border/70 pt-2">
+                  <span className="text-[11px] font-semibold text-ink-muted">
+                    {isEnabled
+                      ? 'ظاهرة الآن للشباب • التصحيح وإضافة النقاط تلقائياً'
+                      : 'مخفية عن المشاركين حتى تقوم بتفعيلها'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewQuiz(quiz)}
+                    className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl border border-midnight/25 bg-white px-3 text-xs font-bold text-midnight transition hover:bg-midnight hover:text-white"
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                    <span>معاينة الأسئلة</span>
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Automatic Daily Verse + Coptic Fathers Quote Live Preview */}
+      <div className="space-y-2.5 rounded-[22px] border border-midnight/25 bg-gradient-to-br from-midnight-dark via-midnight to-midnight-dark p-4 text-white shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5">
+            <BookOpen className="h-4 w-4 text-gold-bright" />
+            <h3 className="text-sm font-extrabold text-gold-bright">
+              آية اليوم وأقوال آباء الكنيسة القبطية (تلقائي 100%)
+            </h3>
+          </div>
+          <span className="rounded-full bg-white/15 px-2.5 py-0.5 text-[10px] font-bold text-gold-bright">
+            يتجدد يومياً تلقائياً ✨
+          </span>
+        </div>
+        <p className="text-[11px] text-white/80">
+          تُختار آية اليوم تلقائياً كل يوم من منهج الإنجيل اليومي مع قول متناغم من أقوال آباء الكنيسة القبطية الأرثوذكسية عن صوم الميلاد والتجسد، وتظهر فوراً للشباب وفي إشعارات التشجيع اليومية.
+        </p>
+
+        <div className="space-y-2 rounded-2xl border border-gold-bright/35 bg-white/10 p-3.5">
+          <span className="inline-block rounded-full bg-gold-warm/25 px-2.5 py-0.5 text-[10px] font-bold text-gold-bright">
+            منهج اليوم: {todayDevotion.chapterLabel}
+          </span>
+          <p className="font-amiri text-base font-bold leading-relaxed text-white">
+            {todayDevotion.verseText}
+          </p>
+          <p className="text-xs font-bold text-gold-bright">— {todayDevotion.verseRef}</p>
+          <div className="rounded-xl bg-black/20 p-2.5 text-xs leading-relaxed text-white/95">
+            «{todayDevotion.fatherQuote}»
+            <span className="mt-1 block text-[11px] font-bold text-gold-bright">
+              — {todayDevotion.fatherName}
+            </span>
+          </div>
+        </div>
       </div>
 
       <h3 className="text-base font-bold text-midnight">

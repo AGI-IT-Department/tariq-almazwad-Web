@@ -88,6 +88,9 @@ export const localStore = {
         typeof stored.activeWeek === 'number' && stored.activeWeek >= 1 && stored.activeWeek <= 5
           ? stored.activeWeek
           : DEFAULT_APP_CONFIG.activeWeek,
+      enabledQuizWeeks: Array.isArray(stored.enabledQuizWeeks)
+        ? stored.enabledQuizWeeks
+        : DEFAULT_APP_CONFIG.enabledQuizWeeks,
       weeklyQuizQuestions: Array.isArray(stored.weeklyQuizQuestions)
         ? stored.weeklyQuizQuestions
         : [],

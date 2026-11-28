@@ -4,8 +4,9 @@ import {
   BookOpen,
   CalendarDays,
   CheckCircle2,
-  ExternalLink,
+  Eye,
   HelpCircle,
+  Lock,
   PlayCircle,
   Sparkles,
   Trophy,
@@ -18,23 +19,36 @@ import {
   getSyllabusForWeek,
   isQuizHighlightDay,
 } from '../lib/readingPlan';
-import { UrlValidator, openSafeExternalUrl } from '../lib/securityAndExport';
-import { decodeQuizConfig } from '../lib/weeklySyllabus';
+import {
+  findUserAutoQuizSubmission,
+  getAutoWeeklyQuiz,
+  getEnabledQuizWeeks,
+} from '../lib/autoContent';
 import { StatusBadge, TaskSubmissionSheet } from '../components/SharedUi';
-import { WeeklyQuizModal } from '../components/WeeklyQuizModal';
+import { AutoWeeklyQuizModal } from '../components/AutoWeeklyQuizModal';
 
 interface ReadingPlanScreenProps {
+  userId: string;
   allTasks: ChallengeTask[];
   userSubmissions: TaskSubmission[];
   appConfig: AppConfig;
   onSubmitTask: (task: ChallengeTask, note: string) => void;
+  onSubmitAutoQuiz: (
+    weekNumber: number,
+    correctCount: number,
+    totalItems: number,
+    earnedPoints: number,
+    preferredTaskId?: string
+  ) => Promise<boolean>;
 }
 
 export const ReadingPlanScreen: React.FC<ReadingPlanScreenProps> = ({
+  userId,
   allTasks,
   userSubmissions,
   appConfig,
   onSubmitTask,
+  onSubmitAutoQuiz,
 }) => {
   const today = useMemo(() => todayFastDate(), []);
   const isAfterEnd = FastCalendar.isAfterEnd(today);
@@ -42,21 +56,18 @@ export const ReadingPlanScreen: React.FC<ReadingPlanScreenProps> = ({
   const officialChapter = useMemo(() => getOfficialDailyChapter(today), [today]);
   const activeWeekNum = Math.min(Math.max(appConfig.activeWeek || 1, 1), 5);
   const activeSyllabus = useMemo(() => getSyllabusForWeek(activeWeekNum), [activeWeekNum]);
+  const enabledQuizWeeks = useMemo(() => getEnabledQuizWeeks(appConfig), [appConfig]);
 
   const [expandedWeek, setExpandedWeek] = useState<number>(activeWeekNum);
   const [selectedTaskForSheet, setSelectedTaskForSheet] = useState<ChallengeTask | null>(null);
   const [sheetInitialNote, setSheetInitialNote] = useState('');
-  const [showQuizModal, setShowQuizModal] = useState(false);
+  const [activeAutoQuiz, setActiveAutoQuiz] = useState<{
+    weekNumber: number;
+    completedPoints: number | null;
+  } | null>(null);
 
   const incarnationTask = useMemo(
     () => allTasks.find((t) => t.id === 'task_incarnation_book' && t.isActive) ?? null,
-    [allTasks]
-  );
-  const weeklyQuizTask = useMemo(
-    () =>
-      allTasks.find((t) => t.id === 'task_weekly_exam_incarnation' && t.isActive) ??
-      allTasks.find((t) => t.id === 'task_weekly_quiz' && t.isActive) ??
-      null,
     [allTasks]
   );
 
@@ -70,35 +81,16 @@ export const ReadingPlanScreen: React.FC<ReadingPlanScreenProps> = ({
         : null,
     [incarnationTask, userSubmissions, weeklyPeriodKey]
   );
-  const quizSub = useMemo(
-    () =>
-      weeklyQuizTask
-        ? userSubmissions.find(
-            (s) => s.taskId === weeklyQuizTask.id && s.periodKey === weeklyPeriodKey
-          ) ?? null
-        : null,
-    [weeklyQuizTask, userSubmissions, weeklyPeriodKey]
-  );
 
   const isIncarnationLocked =
     isAfterEnd || incarnationSub?.status === 'pending' || incarnationSub?.status === 'approved';
-  const isQuizLocked =
-    isAfterEnd || quizSub?.status === 'pending' || quizSub?.status === 'approved';
 
-  const decodedQuiz = useMemo(
-    () => decodeQuizConfig(appConfig.weeklyQuizQuestion),
-    [appConfig.weeklyQuizQuestion]
+  const activeAutoQuizData = useMemo(() => getAutoWeeklyQuiz(activeWeekNum), [activeWeekNum]);
+  const isActiveWeekQuizEnabled = enabledQuizWeeks.includes(activeWeekNum);
+  const activeWeekQuizSub = useMemo(
+    () => findUserAutoQuizSubmission(userSubmissions, userId, activeWeekNum, today),
+    [userSubmissions, userId, activeWeekNum, today]
   );
-  const effectiveQuizQuestions = useMemo(
-    () =>
-      appConfig.weeklyQuizQuestions && appConfig.weeklyQuizQuestions.length > 0
-        ? appConfig.weeklyQuizQuestions
-        : decodedQuiz.questions,
-    [appConfig.weeklyQuizQuestions, decodedQuiz.questions]
-  );
-
-  const hasInAppQuestions = effectiveQuizQuestions.length > 0;
-  const hasQuizLink = UrlValidator.isSafeHttpUrl(appConfig.weeklyQuizUrl);
 
   return (
     <div className="mx-auto max-w-[640px] space-y-4 px-4 pt-3.5 pb-40">
@@ -118,15 +110,21 @@ export const ReadingPlanScreen: React.FC<ReadingPlanScreenProps> = ({
         />
       )}
 
-      {showQuizModal && weeklyQuizTask && hasInAppQuestions && (
-        <WeeklyQuizModal
-          title={appConfig.weeklyQuizTitle.trim() || activeSyllabus.quizTitleAr}
-          weekLabel={activeSyllabus.titleAr}
-          questions={effectiveQuizQuestions}
-          points={weeklyQuizTask.points}
-          alreadySubmittedStatus={quizSub?.status ?? null}
-          onSubmitAnswers={(summary) => onSubmitTask(weeklyQuizTask, summary)}
-          onClose={() => setShowQuizModal(false)}
+      {activeAutoQuiz && (
+        <AutoWeeklyQuizModal
+          quiz={getAutoWeeklyQuiz(activeAutoQuiz.weekNumber)}
+          userId={userId}
+          completedPoints={activeAutoQuiz.completedPoints}
+          onSubmitResult={(weekNumber, correctCount, totalItems, earnedPoints) =>
+            onSubmitAutoQuiz(
+              weekNumber,
+              correctCount,
+              totalItems,
+              earnedPoints,
+              'task_weekly_exam_incarnation'
+            )
+          }
+          onClose={() => setActiveAutoQuiz(null)}
         />
       )}
 
@@ -235,79 +233,71 @@ export const ReadingPlanScreen: React.FC<ReadingPlanScreenProps> = ({
             )}
           </div>
 
-          {/* Weekly Sunday Quiz Card */}
+          {/* Automatic Weekly Quiz Card */}
           <div className="rounded-2xl border border-burgundy/35 bg-burgundy/8 p-3.5">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-1.5 text-burgundy">
                 <Trophy className="h-4 w-4 shrink-0" />
                 <p className="text-xs font-extrabold">
-                  {activeSyllabus.quizTitleAr} • {activeSyllabus.quizDateAr}
+                  {activeAutoQuizData.titleAr} • {activeSyllabus.quizDateAr}
                 </p>
               </div>
               <span className="rounded-full bg-burgundy px-2.5 py-0.5 text-[11px] font-bold text-white">
-                +{weeklyQuizTask?.points ?? activeSyllabus.quizPoints} نقطة
+                {activeAutoQuizData.totalItems} سؤال • {activeAutoQuizData.maxPoints} نقطة
               </span>
             </div>
 
-            {appConfig.weeklyQuizTitle.trim() && (
-              <p className="mt-1.5 text-sm font-bold text-ink-deep">
-                {appConfig.weeklyQuizTitle}
-              </p>
-            )}
-            {decodedQuiz.introText && (
-              <p className="mt-1 text-xs leading-relaxed text-ink-muted">
-                {decodedQuiz.introText}
-              </p>
-            )}
+            <p className="mt-1.5 text-xs leading-relaxed text-ink-muted">
+              {activeAutoQuizData.subtitleAr} — تصحيح تلقائي فوري وإضافة النقاط مباشرة لرصيدك (2 نقطة لكل سؤال).
+            </p>
 
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              {hasInAppQuestions && weeklyQuizTask && (
+            <div className="mt-3">
+              {activeWeekQuizSub ? (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-status-approvedBg px-3 py-1 text-xs font-extrabold text-status-approved">
+                    <CheckCircle2 className="h-4 w-4" />
+                    <span>
+                      تم الحل والاعتماد: {activeWeekQuizSub.points} / {activeAutoQuizData.maxPoints} نقطة
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActiveAutoQuiz({
+                        weekNumber: activeWeekNum,
+                        completedPoints: activeWeekQuizSub.points,
+                      })
+                    }
+                    className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-midnight/25 bg-white px-3.5 text-xs font-bold text-midnight hover:bg-midnight hover:text-white"
+                  >
+                    <Eye className="h-4 w-4" />
+                    <span>مراجعة الإجابات</span>
+                  </button>
+                </div>
+              ) : isActiveWeekQuizEnabled ? (
                 <button
                   type="button"
-                  onClick={() => setShowQuizModal(true)}
-                  className="inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl bg-burgundy px-3 text-xs font-bold text-white shadow-sm transition hover:opacity-95"
+                  disabled={isAfterEnd}
+                  onClick={() =>
+                    setActiveAutoQuiz({
+                      weekNumber: activeWeekNum,
+                      completedPoints: null,
+                    })
+                  }
+                  className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-xl bg-burgundy px-3 text-xs font-bold text-white shadow-sm transition hover:opacity-95 disabled:opacity-50"
                 >
-                  <PlayCircle className="h-4 w-4" />
-                  <span>ابدأ المسابقة داخل التطبيق ({effectiveQuizQuestions.length} أسئلة)</span>
-                </button>
-              )}
-
-              {hasQuizLink && (
-                <button
-                  type="button"
-                  onClick={() => openSafeExternalUrl(appConfig.weeklyQuizUrl)}
-                  className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-burgundy bg-white px-3 text-xs font-bold text-burgundy transition hover:bg-burgundy hover:text-white"
-                >
-                  <ExternalLink className="h-4 w-4" />
-                  <span>فتح رابط المسابقة</span>
-                </button>
-              )}
-
-              {weeklyQuizTask && (
-                <button
-                  type="button"
-                  disabled={isQuizLocked}
-                  onClick={() => {
-                    setSheetInitialNote(
-                      `تم حل ${activeSyllabus.quizTitleAr} (${activeSyllabus.quizDateAr})`
-                    );
-                    setSelectedTaskForSheet(weeklyQuizTask);
-                  }}
-                  className={`inline-flex h-10 items-center justify-center gap-1.5 rounded-xl px-3.5 text-xs font-bold transition ${
-                    isQuizLocked
-                      ? 'bg-parchment-variant text-ink-muted'
-                      : 'bg-midnight text-white hover:bg-midnight-dark'
-                  }`}
-                >
-                  <CheckCircle2 className="h-4 w-4" />
+                  <PlayCircle className="h-4 w-4 text-gold-bright" />
                   <span>
-                    {quizSub?.status === 'approved'
-                      ? 'تم اعتماد المسابقة'
-                      : quizSub?.status === 'pending'
-                        ? 'تم إرسال الإجابات'
-                        : 'تسجيل حل المسابقة'}
+                    {isAfterEnd
+                      ? 'انتهت فترة التحدي'
+                      : `ابدأ ${activeAutoQuizData.titleAr} (${activeAutoQuizData.totalItems} سؤال • تصحيح فوري)`}
                   </span>
                 </button>
+              ) : (
+                <div className="flex items-center gap-2 rounded-xl border border-parchment-outline bg-white/85 px-3 py-2 text-xs font-semibold text-ink-muted">
+                  <Lock className="h-4 w-4 shrink-0 text-gold-warm" />
+                  <span>بانتظار تفعيل هذه المسابقة من خدام التحدي</span>
+                </div>
               )}
             </div>
           </div>
@@ -323,6 +313,14 @@ export const ReadingPlanScreen: React.FC<ReadingPlanScreenProps> = ({
         {WEEKLY_SYLLABUS.map((week) => {
           const isActive = week.weekNumber === activeWeekNum;
           const isOpen = expandedWeek === week.weekNumber;
+          const weekQuiz = getAutoWeeklyQuiz(week.weekNumber);
+          const isWeekQuizEnabled = enabledQuizWeeks.includes(week.weekNumber);
+          const weekQuizSub = findUserAutoQuizSubmission(
+            userSubmissions,
+            userId,
+            week.weekNumber,
+            today
+          );
 
           return (
             <div
@@ -356,6 +354,15 @@ export const ReadingPlanScreen: React.FC<ReadingPlanScreenProps> = ({
                           الأسبوع الحالي
                         </span>
                       )}
+                      {weekQuizSub ? (
+                        <span className="rounded-full bg-status-approvedBg px-2 py-0.5 text-[10px] font-bold text-status-approved">
+                          تم حل المسابقة ({weekQuizSub.points}/200) ✓
+                        </span>
+                      ) : isWeekQuizEnabled ? (
+                        <span className="rounded-full bg-burgundy/12 px-2 py-0.5 text-[10px] font-bold text-burgundy">
+                          المسابقة مفعّلة ✨
+                        </span>
+                      ) : null}
                     </div>
                     <p className="text-xs text-ink-muted">{week.dateRangeAr}</p>
                   </div>
@@ -366,7 +373,7 @@ export const ReadingPlanScreen: React.FC<ReadingPlanScreenProps> = ({
               </button>
 
               {isOpen && (
-                <div className="space-y-2 border-t border-parchment-border bg-parchment/35 px-4 py-3 text-xs">
+                <div className="space-y-2.5 border-t border-parchment-border bg-parchment/35 px-4 py-3 text-xs">
                   <div className="flex items-start gap-2">
                     <BookOpen className="mt-0.5 h-4 w-4 shrink-0 text-midnight" />
                     <div>
@@ -388,10 +395,54 @@ export const ReadingPlanScreen: React.FC<ReadingPlanScreenProps> = ({
                     <div>
                       <span className="font-bold text-burgundy">{week.quizTitleAr}: </span>
                       <span className="font-semibold text-ink-deep">
-                        {week.quizDateAr} ({week.quizPoints} نقطة)
+                        {week.quizDateAr} ({weekQuiz.totalItems} سؤال • {weekQuiz.maxPoints} نقطة)
                       </span>
                     </div>
                   </div>
+
+                  {weekQuizSub ? (
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-status-approvedBg px-2.5 py-1 text-[11px] font-bold text-status-approved">
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        <span>
+                          نتيجتك المعتمدة: {weekQuizSub.points} / {weekQuiz.maxPoints} نقطة
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setActiveAutoQuiz({
+                            weekNumber: week.weekNumber,
+                            completedPoints: weekQuizSub.points,
+                          })
+                        }
+                        className="inline-flex h-9 items-center gap-1 rounded-xl border border-midnight/25 bg-white px-3 text-[11px] font-bold text-midnight hover:bg-midnight hover:text-white"
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                        <span>مراجعة الإجابات</span>
+                      </button>
+                    </div>
+                  ) : isWeekQuizEnabled ? (
+                    <button
+                      type="button"
+                      disabled={isAfterEnd}
+                      onClick={() =>
+                        setActiveAutoQuiz({
+                          weekNumber: week.weekNumber,
+                          completedPoints: null,
+                        })
+                      }
+                      className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-burgundy px-3 text-xs font-bold text-white shadow-xs transition hover:opacity-95 disabled:opacity-50"
+                    >
+                      <PlayCircle className="h-4 w-4 text-gold-bright" />
+                      <span>ابدأ {weekQuiz.titleAr} الآن ({weekQuiz.totalItems} سؤال)</span>
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-1.5 text-[11px] font-semibold text-ink-muted">
+                      <Lock className="h-3.5 w-3.5 text-gold-warm" />
+                      <span>المسابقة مغلقة حالياً بانتظار التفعيل من خدام التحدي</span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
